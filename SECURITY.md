@@ -1,0 +1,41 @@
+# Security policy
+
+## Reporting a vulnerability
+Please **do not open a public issue** for security problems. Use GitHub's private vulnerability reporting
+("Security" tab → "Report a vulnerability") on this repository, with steps to reproduce and the affected version or commit.
+
+## Security model
+
+**Credentials**
+- First run: every protected route is denied. The server prints a one-time setup code to its log; whoever presents it in
+  the browser sets the admin password (stored only as a salted scrypt hash, 12-character minimum). The code lives in memory
+  and changes on every restart until setup is complete.
+- Browser sessions are random cookies (`HttpOnly`, `SameSite=Strict`, `Secure` over HTTPS), kept in memory as SHA-256 only,
+  12 hours long, ended by sign-out or a password change. Browser writes also need a custom CSRF header.
+- Automation may use `CPSIM_API_KEY` (full access). `/metrics` accepts only `CPSIM_METRICS_TOKEN` (or a full credential); a
+  metrics token can read nothing else and a browser session cannot scrape.
+- With no credential configured the app denies everything; `CPSIM_ALLOW_ANONYMOUS=true` is an explicit demo-only opt-out.
+- Failed credentials are rate limited (10 per minute per client address, in memory, per process).
+
+**Secrets are never stored in a city.** A city holds only the *name* of the environment variable that carries its CityPulse
+ingest token (validated as an upper-case variable name, so pasting a token there is refused). Cities and the password hash
+are the only things persisted (a JSON file with mode 0600, or Postgres).
+
+**Untrusted input.** Every city is validated: names, numbers (finite, bounded), counts (a group at most 5,000, a city 10,000),
+sensor types and protocols from allow-lists, unknown fields rejected. The CityPulse URL must be `https` (plain `http` only for
+this machine), carry no credentials, query or fragment, and must not be a link-local address (cloud metadata). Requests are
+capped at 512 KB.
+
+**Outbound requests.** The only outbound traffic is to the city's CityPulse URL (the ingest token goes there and nowhere else;
+redirects are never followed) and, if configured, to PagerLens (one token, same rules).
+
+**Industrial protocol endpoints.** They bind to loopback by default. Binding to all interfaces is a per-city opt-in, because
+Modbus, EtherNet/IP, EtherCAT, PROFINET and PROFIBUS have no authentication: anyone who can reach a port can read the
+simulated values. They are read-only (writes are refused or ignored), bounded in message size, and survive malformed input
+(tested). Do not expose them to untrusted networks.
+
+**Container.** Non-root, no secrets baked in, strict Content-Security-Policy (no inline scripts or styles), `X-Frame-Options:
+DENY`, `nosniff`, `no-referrer`; the interface builds DOM nodes with `textContent`.
+
+**Known limits.** Rate limiting and sessions are per process. A leaked ingest token lets an attacker push readings to CityPulse
+(bounded by its validation) until revoked; use one token per simulator.

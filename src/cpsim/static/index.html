@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>CityPulse Simulator</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="description" content="Build cities of simulated sensors that speak Modbus TCP, EtherNet/IP, EtherCAT, PROFINET and PROFIBUS, with random bursts, and send their data to CityPulse.">
+<link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<header class="top">
+  <a class="brand" href="#cities"><img src="/static/logo.svg" alt="" width="34" height="34"><span>CityPulse Simulator</span></a>
+  <nav id="nav" class="tabs" hidden>
+    <a href="#cities" data-tab="cities">Cities</a>
+    <a href="#protocols" data-tab="protocols">Protocols</a>
+    <a href="#settings" data-tab="settings">Settings</a>
+  </nav>
+  <button id="signout" class="ghost" type="button" hidden>Sign out</button>
+</header>
+<main class="wide">
+  <section id="auth-card" class="card narrow" hidden></section>
+  <section id="view-cities" hidden></section>
+  <section id="view-protocols" hidden></section>
+  <section id="view-settings" hidden></section>
+</main>
+<div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+<script src="/static/app.js" type="module"></script>
+</body>
+</html>

@@ -1,0 +1,15 @@
+# A city in a file. Run it headless:  cpsim run examples/metropolis.yaml
+# Secrets never go here: token_env names the ENVIRONMENT VARIABLE that holds the CityPulse ingest token.
+name: metropolis
+target_url: ""                 # e.g. https://your-citypulse.example ; empty = generate only
+token_env: CITYPULSE_INGEST_TOKEN
+seed: 42                       # same seed, same data and the same bursts
+poll_interval: 2               # seconds between the gateway's polls of the field devices
+groups:
+  - {type: temperature,    count: 40, district: d01, protocol: modbus_tcp,  frequency: 10, burst_pct: 10}
+  - {type: traffic_light,  count: 30, district: d03, protocol: ethernet_ip, frequency: 10, burst_pct: 5}
+  - {type: radar,          count: 20, district: d03, protocol: ethernet_ip, frequency: 10, burst_pct: 15, lo: 20, hi: 90}
+  - {type: water_pressure, count: 24, district: d04, protocol: ethercat,    frequency: 10, burst_pct: 10}
+  - {type: smart_meter,    count: 30, district: d05, protocol: profinet,    frequency: 10, burst_pct: 10}
+  - {type: air_quality,    count: 24, district: d06, protocol: profibus,    frequency: 15, burst_pct: 20}
+  - {type: rain,           count: 20, district: d07, protocol: direct,       frequency: 15, burst_pct: 10}
