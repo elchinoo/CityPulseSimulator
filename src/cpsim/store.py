@@ -27,7 +27,7 @@ class FileStore:
         try:
             return json.loads(self.path.read_text())
         except FileNotFoundError:
-            return {"settings": {}, "cities": {}}
+            return {"settings": {}, "cities": {}, "companies": {}}
 
     def _save(self, data: dict) -> None:
         fd, tmp = tempfile.mkstemp(dir=self.path.parent)
@@ -68,6 +68,22 @@ class FileStore:
             d["cities"].pop(name, None)
             self._save(d)
 
+    def companies(self) -> dict[str, dict]:
+        with self.lock:
+            return self._load().get("companies", {})
+
+    def save_company(self, name: str, spec: dict) -> None:
+        with self.lock:
+            d = self._load()
+            d.setdefault("companies", {})[name] = spec
+            self._save(d)
+
+    def delete_company(self, name: str) -> None:
+        with self.lock:
+            d = self._load()
+            d.setdefault("companies", {}).pop(name, None)
+            self._save(d)
+
     def healthy(self) -> bool:
         return True
 
@@ -84,6 +100,7 @@ class PgStore:
         if not self._ready:
             conn.execute("CREATE TABLE IF NOT EXISTS cpsim_setting (key text PRIMARY KEY, value text NOT NULL)")
             conn.execute("CREATE TABLE IF NOT EXISTS cpsim_city (name text PRIMARY KEY, spec jsonb NOT NULL)")
+            conn.execute("CREATE TABLE IF NOT EXISTS cpsim_company (name text PRIMARY KEY, spec jsonb NOT NULL)")
             conn.commit()
             self._ready = True
         return conn
@@ -112,6 +129,19 @@ class PgStore:
     def delete_city(self, name: str) -> None:
         with self._conn() as c:
             c.execute("DELETE FROM cpsim_city WHERE name=%s", (name,))
+
+    def companies(self) -> dict[str, dict]:
+        with self._conn() as c:
+            return {r["name"]: r["spec"] for r in c.execute("SELECT name, spec FROM cpsim_company ORDER BY name")}
+
+    def save_company(self, name: str, spec: dict) -> None:
+        with self._conn() as c:
+            c.execute("INSERT INTO cpsim_company VALUES (%s,%s) ON CONFLICT (name) DO UPDATE SET spec=EXCLUDED.spec",
+                      (name, json.dumps(spec)))
+
+    def delete_company(self, name: str) -> None:
+        with self._conn() as c:
+            c.execute("DELETE FROM cpsim_company WHERE name=%s", (name,))
 
     def healthy(self) -> bool:
         try:

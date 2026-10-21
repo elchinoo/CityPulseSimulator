@@ -2,6 +2,8 @@
 import os
 
 from .engine import CityRunner
+from .hr_engine import HrRun, TrustDeskClient
+from .hr_model import Company, parse_company
 from .model import City, SpecError, parse_city
 from .sinks import HttpSink, NullSink
 
@@ -10,6 +12,7 @@ class Runtime:
     def __init__(self, store):
         self.store = store
         self.runners: dict[str, CityRunner] = {}
+        self.hr_runs: dict[str, HrRun] = {}     # the latest run of each company (kept after it ends, for its results)
 
     def specs(self) -> dict[str, City]:
         out = {}
@@ -53,6 +56,8 @@ class Runtime:
     async def stop_all(self) -> None:
         for name in list(self.runners):
             await self.stop(name)
+        for name in list(self.hr_runs):
+            await self.stop_hr(name)
 
     async def autostart(self) -> None:
         for name, city in self.specs().items():
@@ -61,6 +66,52 @@ class Runtime:
                     await self.start(name)
                 except SpecError as exc:
                     print(f"cpsim: cannot autostart {name}: {exc}", flush=True)
+
+    # ---- companies (simulated employers sending requests to TrustDesk) -----------------------------------------
+    def companies(self) -> dict[str, Company]:
+        out = {}
+        for name, raw in self.store.companies().items():
+            try:
+                out[name] = parse_company(raw)
+            except SpecError:
+                continue
+        return out
+
+    def company(self, name: str) -> Company | None:
+        return self.companies().get(name)
+
+    def start_hr(self, name: str) -> HrRun:
+        company = self.company(name)
+        if company is None:
+            raise KeyError(name)
+        current = self.hr_runs.get(name)
+        if current and current.running:
+            raise RuntimeError("this company is already running")
+        if company.total_requests() == 0 and (company.new_employees + company.tenured_employees) == 0:
+            raise SpecError("add employees or requests first")
+        make = None
+        if company.target_url:
+            token = os.environ.get(company.token_env, "") or _file_token(company.token_env)
+            if not token:
+                raise SpecError(f"the environment variable {company.token_env} is empty: set it to a TrustDesk "
+                                f"client token for {company.target_url}")
+
+            def make():  # noqa: E306
+                return TrustDeskClient(company.target_url, token)
+        run = HrRun(company, make)
+        self.hr_runs[name] = run
+        run.start()
+        return run
+
+    async def stop_hr(self, name: str) -> bool:
+        run = self.hr_runs.get(name)
+        if run and run.running:
+            await run.stop()
+            return True
+        return False
+
+    def hr_snapshots(self) -> list[dict]:
+        return [r.snapshot() for r in self.hr_runs.values()]
 
     def snapshots(self) -> list[dict]:
         return [r.snapshot() for r in self.runners.values()]

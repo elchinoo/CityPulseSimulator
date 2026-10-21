@@ -121,8 +121,9 @@ def parse_city(d: dict) -> City:
     if not isinstance(name, str) or not NAME.match(name):
         raise SpecError("name must be lowercase letters, digits and dashes (1 to 40 characters)")
     token_env = d.get("token_env", "CITYPULSE_INGEST_TOKEN")
-    if not isinstance(token_env, str) or not ENV_NAME.match(token_env):
-        raise SpecError("token_env is the NAME of an environment variable (e.g. CITYPULSE_INGEST_TOKEN), never the token itself")
+    if not isinstance(token_env, str) or not ENV_NAME.match(token_env) or "TOKEN" not in token_env:
+        raise SpecError("token_env is the NAME of an environment variable that holds a token and contains 'TOKEN' "
+                        "(e.g. CITYPULSE_INGEST_TOKEN), never the token itself")
     seed = d.get("seed")
     if seed is not None and (isinstance(seed, bool) or not isinstance(seed, int) or not 0 <= seed < 2**32):
         raise SpecError("seed must be a whole number from 0 to 4294967295")

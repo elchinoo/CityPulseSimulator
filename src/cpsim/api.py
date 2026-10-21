@@ -2,6 +2,7 @@ import asyncio
 import contextlib
 import sys
 import time
+from datetime import date
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
@@ -13,6 +14,10 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from . import __version__, auth, metrics, reporter
 from .catalog import DISTRICTS, GROUPS, TYPES
 from .config import get_settings
+from .hr_catalog import DEPARTMENTS
+from .hr_catalog import TYPES as HR_TYPES
+from .hr_gen import build_plan
+from .hr_model import MAX_EMPLOYEES, MAX_PER_TYPE, MAX_TOTAL, parse_company
 from .model import (
     DEVICE_LIMITS,
     MAX_CITY_SENSORS,
@@ -368,3 +373,141 @@ def city_stats(name: str):
     if runner is None:
         raise HTTPException(404, "the city is not running")
     return runner.snapshot()
+
+
+# --- companies: simulated employers that send employees and requests to TrustDesk ----------------------------
+
+def _mix(**counts: int) -> dict:
+    return {k: v for k, v in counts.items() if v}
+
+
+PRESETS = [
+    {"id": "quick", "label": "Quick check (about 60 requests)", "employees": {"new": 4, "tenured": 12},
+     "requests": _mix(vacation=10, sick_leave=8, business_trip=4, expense_travel=6, expense_customer=6, expense_meals=6,
+                      expense_other=4, remote_work=3, overtime=3, other=4, parental_leave=2, equipment_request=2, bereavement_leave=2)},
+    {"id": "hundreds", "label": "Hundreds of mixed requests (about 500)", "employees": {"new": 30, "tenured": 120},
+     "requests": _mix(vacation=90, sick_leave=60, parental_leave=8, bereavement_leave=6, unpaid_leave=8, business_trip=25,
+                      expense_travel=50, expense_customer=40, expense_meals=40, expense_medical=6, expense_training=10,
+                      expense_equipment=12, expense_home_office=8, expense_other=30, remote_work=20, overtime=15,
+                      training_request=12, equipment_request=10, other=50)},
+    {"id": "leave", "label": "Leave stress: vacation and sick leave for old and new hires", "employees": {"new": 25, "tenured": 60},
+     "requests": _mix(vacation=250, sick_leave=150, parental_leave=15, bereavement_leave=15, unpaid_leave=10)},
+    {"id": "expenses", "label": "Expense audit: every kind of reimbursement", "employees": {"new": 15, "tenured": 60},
+     "requests": _mix(expense_travel=90, expense_customer=70, expense_meals=70, expense_medical=25, expense_training=25,
+                      expense_equipment=30, expense_home_office=25, expense_other=40)},
+]
+
+
+@app.get("/api/hr/catalog", dependencies=[Depends(require())])
+def hr_catalog():
+    return {"types": [{"key": t.key, "label": t.label, "kind": t.kind} for t in HR_TYPES.values()],
+            "departments": [d for d, _ in DEPARTMENTS], "presets": PRESETS,
+            "limits": {"per_type": MAX_PER_TYPE, "total": MAX_TOTAL, "employees": MAX_EMPLOYEES}}
+
+
+def _company_summary(name: str, c) -> dict:
+    run = runtime.hr_runs.get(name)
+    return {"name": name, "target_url": c.target_url, "employees": c.new_employees + c.tenured_employees,
+            "requests": c.total_requests(), "types": len(c.requests), "problem_pct": c.problem_pct,
+            "state": run.state if run else "idle", "dry_run": not c.target_url}
+
+
+@app.get("/api/companies", dependencies=[Depends(require())])
+def list_companies():
+    try:
+        return [_company_summary(n, c) for n, c in runtime.companies().items()]
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(503, "the state store is unavailable") from exc
+
+
+@app.get("/api/companies/{name}", dependencies=[Depends(require())])
+def get_company(name: str):
+    c = runtime.company(name)
+    if c is None:
+        raise HTTPException(404, "no such company")
+    run = runtime.hr_runs.get(name)
+    return {**c.to_dict(), "state": run.state if run else "idle"}
+
+
+@app.put("/api/companies/{name}", dependencies=[Depends(require())])
+def put_company(name: str, spec: dict):
+    run = runtime.hr_runs.get(name)
+    if run and run.running:
+        raise HTTPException(409, "stop the company before changing it")
+    try:
+        c = parse_company({**spec, "name": name})
+    except SpecError as exc:
+        raise _bad(exc) from exc
+    runtime.store.save_company(name, c.to_dict())
+    return {"ok": True, "employees": c.new_employees + c.tenured_employees, "requests": c.total_requests()}
+
+
+@app.delete("/api/companies/{name}", dependencies=[Depends(require())])
+async def delete_company(name: str):
+    await runtime.stop_hr(name)
+    runtime.hr_runs.pop(name, None)
+    runtime.store.delete_company(name)
+    return {"ok": True}
+
+
+@app.post("/api/companies/{name}/preview", dependencies=[Depends(require())])
+def preview_company(name: str):
+    """What a run would send, decided from the seed, without sending anything."""
+    c = runtime.company(name)
+    if c is None:
+        raise HTTPException(404, "no such company")
+    plan = build_plan(c)
+    samples: dict[str, list] = {}
+    per: dict[str, dict] = {}
+    for it in plan.items:
+        p = per.setdefault(it.type, {"planned": 0, "problem": 0})
+        p["planned"] += 1
+        p["problem"] += it.problem
+        if len(samples.setdefault(it.type, [])) < 2:
+            samples[it.type].append({"problem": it.problem, **it.payload})
+    depts: dict[str, int] = {}
+    for e in plan.employees:
+        depts[e.department] = depts.get(e.department, 0) + 1
+    return {"seed": plan.seed, "employees": len(plan.employees), "departments": depts,
+            "new_hires": sum(1 for e in plan.employees if e.tenure_days(date.today()) < 90),
+            "requests": len(plan.items), "problem": plan.problems(), "types": per, "samples": samples,
+            "use_existing_note": "Employees already in TrustDesk are added to the pool at run time." if c.use_existing else ""}
+
+
+@app.post("/api/companies/{name}/run", dependencies=[Depends(require())])
+async def run_company(name: str):
+    try:
+        run = runtime.start_hr(name)
+    except KeyError as exc:
+        raise HTTPException(404, "no such company") from exc
+    except RuntimeError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except SpecError as exc:
+        raise _bad(exc) from exc
+    return run.snapshot()
+
+
+@app.post("/api/companies/{name}/stop", dependencies=[Depends(require())])
+async def stop_company(name: str):
+    return {"stopped": await runtime.stop_hr(name)}
+
+
+@app.get("/api/companies/{name}/status", dependencies=[Depends(require())])
+def company_status(name: str):
+    run = runtime.hr_runs.get(name)
+    if run is None:
+        raise HTTPException(404, "this company has not run yet")
+    return run.snapshot()
+
+
+@app.post("/api/companies/{name}/refresh", dependencies=[Depends(require())])
+async def refresh_company(name: str):
+    """Ask TrustDesk where the requests of the latest run stand (approved, rejected, waiting...)."""
+    run = runtime.hr_runs.get(name)
+    if run is None:
+        raise HTTPException(404, "this company has not run yet")
+    try:
+        await run.refresh_statuses()
+    except Exception as exc:  # noqa: BLE001 - e.g. the token was revoked meanwhile
+        raise HTTPException(502, f"could not read the statuses: {exc}") from exc
+    return run.snapshot()

@@ -58,6 +58,22 @@ class SimCollector:
         yield polls
 
 
+        hr = runtime.hr_snapshots() if runtime else []
+        run = GaugeMetricFamily("cpsim_hr_runs_running", "Company runs in progress")
+        run.add_metric([], sum(1 for s in hr if s["state"] == "running"))
+        yield run
+        reqs = CounterMetricFamily("cpsim_hr_requests", "Requests sent to TrustDesk by the latest run", labels=["company", "type", "outcome"])
+        emps = CounterMetricFamily("cpsim_hr_employees", "Employees handled by the latest run", labels=["company", "outcome"])
+        for s in hr:
+            for t, c in s["types"].items():
+                for outcome in ("accepted", "invalid", "errors", "withdrawn"):
+                    reqs.add_metric([s["company"], t, outcome], c[outcome])
+            for outcome in ("created", "existing", "failed"):
+                emps.add_metric([s["company"], outcome], s["employees"][outcome])
+        yield reqs
+        yield emps
+
+
 REGISTRY.register(SimCollector())
 
 

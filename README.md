@@ -18,6 +18,42 @@ data reach CityPulse the way it would from a real plant: through **industrial pr
 * **Random bursts** driven by a percentage per group (below), plus a *burst the whole city* button.
 * **Monitored by PagerLens**: `/healthz`, `/metrics` (scope-limited token) and an optional self-report.
 
+## Companies: simulated employees for TrustDesk
+
+The same app also simulates an **employer** for [TrustDesk](https://github.com/elchinoo/TrustDesk). A *company* says how many
+employees to create and **how many requests of each type to send**, and the simulator behaves like a client application
+(TrustDesk's `/api/v1`, with a token that has the *Client application* scope).
+
+- **Employees:** *new hires* (started in the last ~75 days, to test probation rules) and *tenured* staff (1 to 15 years, to build
+  leave and sick history), in nine departments with managers above the others. With *use existing* it also picks employees that
+  already exist in TrustDesk. All names and e-mail addresses are invented, and every address is on `example.com`.
+- **Requests:** a count for each of the 19 request types: vacation, sick, parental, bereavement and unpaid leave; business trips;
+  travel, customer, meal, medical, training, equipment, home-office and other expenses; remote work, overtime, training and
+  equipment requests; and free-form "other". Up to 5,000 per type and 20,000 per run.
+- **Problem share:** a percentage of the requests is built to break a typical policy (too little notice, too long, over a limit,
+  no receipt, overlapping an earlier request of the same employee, duplicates, gift cards, work abroad...). The rest are written to
+  comply. TrustDesk then decides what each one really is under *its* policies.
+- **Reproducible:** the same seed gives the same people and requests (employee numbers carry the seed, so two seeds never clash).
+  Requests carry an `Idempotency-Key`, so running again never duplicates them.
+- **Behaviour:** requests per second (at most), parallel connections, a share withdrawn after sending, retry with back-off on
+  `429` and `503`, and a clear failure on a refused token. Progress is shown per type; **Refresh TrustDesk statuses** reads back
+  where the requests stand now.
+
+In the web app open **Companies**, pick a preset (quick check, hundreds of mixed requests, leave stress, expense audit) or set the
+count of each type yourself, **Preview** to see what would be sent, then **Save and run**. The target URL may be empty
+to generate without sending. Headless:
+
+```bash
+export TRUSTDESK_CLIENT_TOKEN=<TrustDesk token with the Client application scope>
+cpsim hr-validate examples/acme-hundreds.yaml
+cpsim hr-run examples/acme-hundreds.yaml --dry-run     # generate only
+cpsim hr-run examples/acme-hundreds.yaml               # set target_url in the file first
+```
+
+The company stores only the *name* of the token variable (it must contain `TOKEN`; the token is never saved), and the token is
+sent only to the company's URL. The generated requests are checked against TrustDesk's own validation in the tests when both
+repositories are side by side.
+
 ## The protocols, honestly
 
 | Protocol | Transport here | What is implemented |
@@ -79,6 +115,7 @@ city page shows each endpoint). Endpoints bind to loopback unless you tick *Let 
 |---|---|
 | `DATABASE_URL` / `DB_EXTERNAL_DSN` / `PSQL_CONNECTION_STRING` | If set, cities and the admin password hash live in Postgres (they survive restarts, the AgentPG way). Otherwise a JSON file in `CPSIM_DATA_DIR` (default `data/`). |
 | `CITYPULSE_INGEST_TOKEN` (or the variable a city names in `token_env`) | The ingest token for that city's CityPulse. Also read from `<NAME>_FILE`. **Never stored in a city.** |
+| `TRUSTDESK_CLIENT_TOKEN` (or the variable a company names in `token_env`) | A TrustDesk token with the *Client application* scope, for Companies. Also read from `<NAME>_FILE`. **Never stored in a company.** |
 | `CPSIM_METRICS_TOKEN` | Lets `/metrics` be scraped with a token that can read nothing else. |
 | `CPSIM_API_KEY` | Optional static full-access key for automation. |
 | `PAGERLENS_URL`, `PAGERLENS_TOKEN` | Report to PagerLens (an ingest token from PagerLens). https required unless localhost. |
@@ -119,6 +156,11 @@ check), the generator (burst probability rises with the percentage; seeds reprod
 validation of cities, a whole city across all five protocols into a sink, back-pressure and retry, and the web API.
 
 ## Honest limits
+
+- **Company runs:** the requests are plausible, not realistic. They assume common policy values (25 vacation days, 30 days' notice
+  for long leave, receipts from 25 USD...); a different policy set will judge them differently. Employees never answer when an
+  approver asks for information, and the simulator cannot approve or reject (a client token cannot). Results of a run live in memory
+  and are lost on restart.
 
 * One protocol endpoint per protocol per city, hosting up to 32 sensors per device; a city is capped at 10,000 sensors.
 * The gateway and devices share a process, so this shows data-path behaviour and failure modes, not network latency.

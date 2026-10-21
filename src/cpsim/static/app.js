@@ -1,12 +1,13 @@
 import { api } from "/static/api.js";
 import { initCities, stopCities } from "/static/cities.js";
+import { initCompanies, stopCompanies } from "/static/companies.js";
 import { initProtocols } from "/static/protocols.js";
 import { refreshSession, renderLogin, renderSetup, state } from "/static/session.js";
 import { initSettings } from "/static/settings.js";
 import { $, h } from "/static/ui.js";
 
-const TABS = ["cities", "protocols", "settings"];
-const INIT = { cities: initCities, protocols: initProtocols, settings: initSettings };
+const TABS = ["cities", "companies", "protocols", "settings"];
+const INIT = { cities: initCities, companies: initCompanies, protocols: initProtocols, settings: initSettings };
 const SECTIONS = ["auth-card", "nav", "signout", ...TABS.map((t) => "view-" + t)];
 
 function hideAll() { for (const id of SECTIONS) $(id).hidden = true; }
@@ -25,6 +26,7 @@ function showUnavailable(err) {
 async function boot(notice = "") {
   hideAll();
   stopCities();
+  stopCompanies();
   let s;
   try { s = await refreshSession(); } catch (err) { showUnavailable(err); return; }
   if (s.state === "setup_required") renderSetup(() => boot());
@@ -37,9 +39,10 @@ function route() {
   const [name, ...arg] = location.hash.slice(1).split("/");
   const tab = TABS.includes(name) ? name : "cities";
   if (tab !== "cities") stopCities();
+  if (tab !== "companies") stopCompanies();
   for (const t of TABS) $("view-" + t).hidden = t !== tab;
   for (const a of document.querySelectorAll("#nav a")) a.classList.toggle("active", a.dataset.tab === tab);
-  INIT[tab](tab === "cities" ? arg : undefined);
+  INIT[tab](tab === "cities" || tab === "companies" ? arg : undefined);
 }
 
 $("signout").addEventListener("click", async () => {

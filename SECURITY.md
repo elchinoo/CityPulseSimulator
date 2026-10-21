@@ -37,5 +37,10 @@ simulated values. They are read-only (writes are refused or ignored), bounded in
 **Container.** Non-root, no secrets baked in, strict Content-Security-Policy (no inline scripts or styles), `X-Frame-Options:
 DENY`, `nosniff`, `no-referrer`; the interface builds DOM nodes with `textContent`.
 
+**Companies (TrustDesk).** A company stores only the NAME of an environment variable (validated, and it must contain `TOKEN`, so it
+cannot point at a database URL or an API key). The TrustDesk client token is sent only to the company's URL (https, or http for this
+machine; no credentials, no link-local addresses; redirects are never followed). Generated people are invented and use `example.com`
+addresses. A run is bounded (20,000 requests, 2,000 employees, 200 requests per second, 16 connections).
+
 **Known limits.** Rate limiting and sessions are per process. A leaked ingest token lets an attacker push readings to CityPulse
 (bounded by its validation) until revoked; use one token per simulator.

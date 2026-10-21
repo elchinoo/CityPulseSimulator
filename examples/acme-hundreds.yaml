@@ -1,0 +1,34 @@
+# A company that sends about 500 mixed requests to TrustDesk. Put a TrustDesk *client* token in the
+# environment variable named below (the token itself never goes in this file).
+name: acme-hundreds
+target_url: ""            # e.g. https://<your-trustdesk-host>; empty = generate only
+token_env: TRUSTDESK_CLIENT_TOKEN
+seed: 2026                # same seed, same employees and requests
+employees:
+  new: 30                 # hired in the last ~75 days: probation rules
+  tenured: 120            # hired 1 to 15 years ago: leave history and balances
+  use_existing: false     # true also uses employees that already exist in TrustDesk
+problem_pct: 25           # share of requests built to break a typical policy
+withdraw_pct: 3
+rate: 5                   # requests per second, at most
+concurrency: 4
+requests:
+  vacation: 90
+  sick_leave: 60
+  parental_leave: 8
+  bereavement_leave: 6
+  unpaid_leave: 8
+  business_trip: 25
+  expense_travel: 50
+  expense_customer: 40
+  expense_meals: 40
+  expense_medical: 6
+  expense_training: 10
+  expense_equipment: 12
+  expense_home_office: 8
+  expense_other: 30
+  remote_work: 20
+  overtime: 15
+  training_request: 12
+  equipment_request: 10
+  other: 50
