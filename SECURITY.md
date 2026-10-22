@@ -65,3 +65,10 @@ the credentials the workloads need, narrow and revocable. Running (`sim:run`), e
 
 **Known limits.** Rate limiting is per process. A leaked ingest token lets an attacker push readings to CityPulse
 (bounded by its validation) until revoked; use one token per simulator.
+
+**Saved credentials.** Credentials may be saved in the app (Settings > Credentials) instead of the environment. They are encrypted with the kit's
+vault, whose data key is wrapped under the platform secret `CPSIM_ENCRYPTION_KEY` and the admin password; the database alone cannot decrypt
+them. Plaintext exists only in process memory; no endpoint returns it and the interface never shows it. Names must contain `TOKEN`, `KEY` or
+`SECRET` and may not be the simulator's own or the database's; only `settings:manage` may list, save or delete them. The environment wins
+over a saved value, so an operator can always override from outside. Residual risk: an administrator can point a workload at a URL they
+control and have the simulator send that workload's credential there; keep the role for people you trust with the credentials.

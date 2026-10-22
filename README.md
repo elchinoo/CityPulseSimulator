@@ -272,12 +272,13 @@ city page shows each endpoint). Endpoints bind to loopback unless you tick *Let 
 | Variable | Meaning |
 |---|---|
 | `DATABASE_URL` / `DB_EXTERNAL_DSN` / `PSQL_CONNECTION_STRING` | **Required.** The Postgres database (the AgentPG way) holding cities, companies and the credentials below. |
-| `CITYPULSE_INGEST_TOKEN` (or the variable a city names in `token_env`) | The ingest token for that city's CityPulse. Also read from `<NAME>_FILE`. **Never stored in a city.** |
-| `TRUSTDESK_CLIENT_TOKEN` (or the variable a company names in `token_env`) | A TrustDesk token with the *Client application* scope, for Companies. Also read from `<NAME>_FILE`. **Never stored in a company.** |
+| `CITYPULSE_INGEST_TOKEN` (or the variable a city names in `token_env`) | The ingest token for that city's CityPulse. Also read from `<NAME>_FILE`, or saved under Settings > Credentials. **Never stored in the city itself.** |
+| `TRUSTDESK_CLIENT_TOKEN` (or the variable a company names in `token_env`) | A TrustDesk token with the *Client application* scope, for Companies. Also read from `<NAME>_FILE`, or saved under Settings > Credentials. **Never stored in the company itself.** |
 | `CPSIM_METRICS_TOKEN` | Lets `/metrics` be scraped with a token that can read nothing else. |
 | `CPSIM_API_KEY` | Optional static full-access key for automation. API tokens (read, metrics or full) can also be created under Settings. |
 | `PAGERLENS_URL`, `PAGERLENS_TOKEN` | Report to PagerLens (an ingest token from PagerLens). https required unless localhost. |
-| `PAYBROKER_SECRET_KEY`, `LLMGW_CLIENT_KEY`, `PAGERLENS_TOKEN` (or the variable a workload names in `token_env`) | Credentials for workloads. Also read from `<NAME>_FILE`. **Never stored in a workload.** A name must contain `TOKEN`, `KEY` or `SECRET` and may not be one of the simulator's own (`CPSIM_*`) or the database's. |
+| `PAYBROKER_SECRET_KEY`, `LLMGW_CLIENT_KEY`, `PAGERLENS_TOKEN` (or the variable a workload names in `token_env`) | Credentials for workloads. Also read from `<NAME>_FILE`, or saved under Settings > Credentials. **Never stored in the workload itself.** A name must contain `TOKEN`, `KEY` or `SECRET` and may not be one of the simulator's own (`CPSIM_*`) or the database's. |
+| `CPSIM_ENCRYPTION_KEY[_FILE]` | Platform secret that unlocks the credential store at start, so credentials saved under Settings > Credentials survive a restart. Without it nothing can be saved. |
 | `CPSIM_MAX_RATE` | Ceiling on items per second, per workload and for all running workloads together (default 200). |
 | `CPSIM_ALLOW_HTTP_TARGETS` | `true` allows plain `http` to hosts other than this machine, for local stand-ins reached by name (default off: `https` or localhost only). |
 | `CPSIM_ALLOW_ANONYMOUS` | Demo only: disables authentication entirely. |
@@ -373,3 +374,13 @@ validation of cities, a whole city across all five protocols into a sink, back-p
 * Rate limiting of failed sign-ins is in memory, per process. Sessions live in Postgres and survive a restart.
 
 Licensed under Apache-2.0. See [SECURITY.md](SECURITY.md).
+
+## Credentials saved in the app
+
+A workload, city or company names a credential by variable name (`PAYBROKER_SECRET_KEY`). The value is read from the environment when
+it is set there, otherwise from **Settings > Credentials**, where an administrator pastes it once. It is encrypted with the vault
+(data key wrapped under `CPSIM_ENCRYPTION_KEY` and the admin password), stored as ciphertext in `cpsim_credential`, decrypted only in
+process memory, never returned by the API or shown again, and sent only to the target URL of the workload that names it. Apps that trust
+the identity provider (CityPulse, PagerLens, TrustDesk, the gateway) need no saved credential: the simulator signs in as its own service
+client. Saving, replacing and deleting need `settings:manage` (administrators only). Headless and Docker runs have no database and use
+environment variables or files as before.

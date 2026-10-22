@@ -8,6 +8,7 @@ from apgkit import metrics as metrics_mod
 from apgkit.auth import AppAuth, Authenticator, LocalAuth, Principal, from_env
 from apgkit.config import env_bool, read_secret
 from apgkit.db import Database
+from apgkit.vault import Vault
 
 from . import __version__
 
@@ -16,6 +17,7 @@ COOKIE = "cs_session"
 CSRF_HEADER = "x-cpsim-csrf"
 
 db = Database()
+vault = Vault("CPSIM")
 metrics = metrics_mod.Metrics(APP, __version__)
 
 ALL = frozenset({"*"})
@@ -24,7 +26,7 @@ PERMISSIONS = {
     "sim:run": "start, stop and boost cities; run, stop and refresh companies; start, stop and run workloads once (sends readings, "
                "requests and traffic to other apps)",
     "sim:edit": "create, change and delete cities, companies and workloads",
-    "settings:manage": "admin password and API tokens",
+    "settings:manage": "admin password, API tokens and the credentials saved for the apps it drives",
     "metrics:scrape": "scrape /metrics",
 }
 ROLE_PERMISSIONS = {
@@ -41,7 +43,7 @@ SCOPE_PERMISSIONS = {
 fed = from_env("CPSIM", APP)
 APP_AUTH = AppAuth(APP, fed.client_id, ROLE_PERMISSIONS, SCOPE_PERMISSIONS)
 
-local = LocalAuth(APP_AUTH, env_prefix="CPSIM", token_prefix="cs_", token_scopes={"read", "metrics", "full"})
+local = LocalAuth(APP_AUTH, env_prefix="CPSIM", token_prefix="cs_", token_scopes={"read", "metrics", "full"}, vault=vault)
 
 
 def metrics_token() -> str:

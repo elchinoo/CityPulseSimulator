@@ -14,7 +14,7 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import __version__, auth, core, metrics, reporter
+from . import __version__, auth, core, credentials, metrics, reporter
 from .catalog import DISTRICTS, GROUPS, TYPES
 from .core import COOKIE, CSRF_HEADER, fed, local
 from .hr_catalog import DEPARTMENTS
@@ -61,6 +61,7 @@ async def lifespan(_: FastAPI):
         with core.db.connect(retries=1) as conn:
             if auth.needs_setup(conn) and not fed.enabled:
                 _announce_setup_code()
+            credentials.load(conn, core.vault)
         await runtime.autostart()
     except Exception as exc:  # noqa: BLE001 - e.g. the database is asleep; the UI still comes up
         print(f"cpsim: startup: {str(exc).splitlines()[0][:160]}", file=sys.stderr, flush=True)
@@ -313,6 +314,53 @@ def revoke_token(token_id: int):
         if not local.revoke_token(conn, token_id):
             raise HTTPException(404, "token not found or already revoked")
     return {"revoked": token_id}
+
+
+# --- credentials the simulator presents to the apps it drives ----------------------------------------------
+
+class CredentialBody(BaseModel):
+    value: str = Field(min_length=1, max_length=4096)
+
+
+def _credential_users() -> dict[str, list[str]]:
+    """Which variable names the saved cities, companies and workloads refer to, and by what."""
+    users: dict[str, list[str]] = {}
+    for kind, specs in (("city", store.cities()), ("company", runtime.store.companies()), ("workload", store.workloads())):
+        for name, spec in specs.items():
+            for key in ("token_env", "publishable_env"):
+                if spec.get(key):
+                    users.setdefault(spec[key], []).append(f"{kind} {name}")
+    return users
+
+
+@app.get("/api/credentials", dependencies=[Depends(require("settings:manage"))])
+def list_credentials():
+    """Names only, with where each value comes from. A value is never returned."""
+    users = _credential_users()
+    names = {k.token_env for k in KINDS.values() if k.token_env} | {"CITYPULSE_INGEST_TOKEN", "TRUSTDESK_CLIENT_TOKEN"} | set(users)
+    with core.db.connect() as conn:
+        saved = credentials.saved_names(conn)
+    return {"unlocked": core.vault.is_unlocked(),
+            "items": [{"name": n, "source": credentials.source(n), "saved": n in saved, "used_by": sorted(users.get(n, []))}
+                      for n in sorted(names)]}
+
+
+@app.put("/api/credentials/{name}", dependencies=[Depends(require("settings:manage"))])
+def save_credential(name: str, body: CredentialBody):
+    try:
+        with core.db.connect() as conn:
+            credentials.put(conn, core.vault, name, body.value)
+    except SpecError as exc:
+        raise HTTPException(409 if "locked" in str(exc) else 422, str(exc)) from exc
+    return {"name": name, "source": credentials.source(name)}
+
+
+@app.delete("/api/credentials/{name}", dependencies=[Depends(require("settings:manage"))])
+def delete_credential(name: str):
+    with core.db.connect() as conn:
+        if not credentials.delete(conn, name):
+            raise HTTPException(404, "no saved credential with that name")
+    return {"deleted": name}
 
 
 # --- cities --------------------------------------------------------------------------------------

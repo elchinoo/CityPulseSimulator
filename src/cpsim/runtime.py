@@ -36,7 +36,7 @@ class Runtime:
             return NullSink()
         token = outbound_token(city.token_env, CITYPULSE_INGEST)
         if not token:
-            raise SpecError(f"the environment variable {city.token_env} is empty: set it to an ingest token for {city.target_url} "
+            raise SpecError(f"no credential for {city.token_env}: save an ingest token for {city.target_url} under Settings > Credentials, or set that environment variable "
                             "(or configure the service client of the identity provider: see CPSIM_SERVICE_CLIENT_SECRET)")
         return HttpSink(city.target_url, token)
 
@@ -108,8 +108,8 @@ class Runtime:
             return None
         token = outbound_token(company.token_env, TRUSTDESK_CLIENT)
         if not token:
-            raise SpecError(f"the environment variable {company.token_env} is empty: set it to a TrustDesk "
-                            f"client token for {company.target_url} "
+            raise SpecError(f"no credential for {company.token_env}: save a TrustDesk "
+                            f"client token for {company.target_url} under Settings > Credentials, or set that environment variable "
                             "(or configure the service client of the identity provider: see CPSIM_SERVICE_CLIENT_SECRET)")
 
         def make():

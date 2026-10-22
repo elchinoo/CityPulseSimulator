@@ -39,6 +39,37 @@ function tokensCard() {
     h("div", { class: "card" }, form, tErr), reveal, table];
 }
 
+function credentialsCard() {
+  const box = h("div", {});
+  const note = h("p", { class: "muted" });
+  async function render() {
+    const d = await api("/api/credentials");
+    note.textContent = d.unlocked ? "" : "The credential store is locked: the app has no CPSIM_ENCRYPTION_KEY, so nothing can be saved. Signing in with the admin password unlocks it for this session.";
+    box.replaceChildren(h("div", { class: "card flush" }, h("table", {},
+      h("thead", {}, h("tr", {}, ...["Name", "Source", "Used by", "New value", ""].map((t) => h("th", {}, t)))),
+      h("tbody", {}, ...d.items.map((c) => {
+        const input = h("input", { type: "password", autocomplete: "off", maxlength: "4096", placeholder: c.saved ? "replace saved value" : "paste the credential", disabled: !d.unlocked, "aria-label": `New value for ${c.name}` });
+        const save = async () => {
+          if (!input.value) return;
+          try { await api(`/api/credentials/${encodeURIComponent(c.name)}`, { method: "PUT", json: { value: input.value } }); input.value = ""; toast("Saved"); render(); } catch (err) { toast(err.message, true); }
+        };
+        input.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); save(); } });
+        return h("tr", {}, h("td", { class: "title" }, h("code", {}, c.name)),
+          h("td", {}, c.source === "environment" ? "environment variable (wins)" : c.source === "saved" ? "saved here" : "not set"),
+          h("td", { class: "muted" }, c.used_by.join(", ") || "-"), h("td", {}, input),
+          h("td", { class: "actions" }, h("button", { class: "secondary small", type: "button", disabled: !d.unlocked, onclick: save }, "Save"),
+            c.saved ? h("button", { class: "danger small", type: "button", onclick: async () => {
+              if (!confirm(`Delete the saved ${c.name}? Workloads that use it stop working.`)) return;
+              try { await api(`/api/credentials/${encodeURIComponent(c.name)}`, { method: "DELETE" }); toast("Deleted"); render(); } catch (err) { toast(err.message, true); }
+            } }, "Delete") : null));
+      })))));
+  }
+  render().catch((err) => box.replaceChildren(h("p", { class: "error" }, err.message)));
+  return [h("h2", { class: "section-title" }, "Credentials for the apps it drives"),
+    h("p", { class: "muted" }, "A PayBroker merchant secret key, a gateway client key, an ingest token. Paste one once: it is encrypted with the vault and never shown again. An environment variable of the same name takes precedence. Apps that trust the identity provider (CityPulse, PagerLens, TrustDesk, the gateway) need none: the simulator signs in as its own service client."),
+    note, box];
+}
+
 export async function initSettings() {
   const s = await api("/api/session");
   const has = s.has_admin_password;
@@ -60,7 +91,7 @@ export async function initSettings() {
   has ? field("Current password", cur) : null, field(has ? "New password (12+ characters)" : "Admin password (12+ characters)", nw), field("Repeat", nw2),
   h("button", { class: "primary", type: "submit" }, has ? "Change password" : "Set admin password"), err);
   fill($("view-settings"), h("h1", {}, "Settings"),
-    h("p", { class: "muted" }, "Cities and companies are stored in the linked Postgres database, so they survive restarts. Ingest and client tokens are never stored: a city or company only names the environment variable that holds its token."),
+    h("p", { class: "muted" }, "Cities and companies are stored in the linked Postgres database, so they survive restarts. A city, company or workload only names the credential it uses (an environment variable name); the value comes from the environment or from Settings > Credentials."),
     h("h2", { class: "section-title" }, "Admin password"), h("div", { class: "card" }, form),
-    ...tokensCard());
+    ...credentialsCard(), ...tokensCard());
 }

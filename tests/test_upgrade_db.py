@@ -23,7 +23,7 @@ def test_a_database_of_the_first_release_upgrades_in_place(db):
         c.execute("INSERT INTO cpsim_setting VALUES ('admin_password_hash', %s)", (passwords.hash_password("correct-horse-battery"),))
         c.execute("INSERT INTO cpsim_city VALUES ('oldtown', %s)", (json.dumps(CITY),))
         c.commit()
-    assert migrate.run() == ["001_init.sql", "002_workloads.sql"]
+    assert migrate.run() == ["001_init.sql", "002_workloads.sql", "003_credentials.sql"]
     assert migrate.run() == []                                   # idempotent
     assert PgStore().cities()["oldtown"]["groups"][0]["count"] == 3
     with database.connect() as c:
@@ -60,7 +60,7 @@ def test_a_deployment_on_the_previous_schema_gains_workloads_and_keeps_everythin
         c.execute("INSERT INTO cpsim_city VALUES ('oldtown', %s)", (json.dumps(CITY),))
         c.execute("INSERT INTO cpsim_company VALUES ('oldco', %s)", (json.dumps(company),))
         c.commit()
-    assert migrate.run() == ["002_workloads.sql"]
+    assert migrate.run() == ["002_workloads.sql", "003_credentials.sql"]
     assert migrate.run() == []
     store = PgStore()
     assert store.workloads() == {} and store.cities()["oldtown"]["groups"][0]["count"] == 3

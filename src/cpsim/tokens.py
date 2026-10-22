@@ -1,6 +1,6 @@
 """The token this app presents to another app of the ecosystem (CityPulse ingest, TrustDesk client API, PagerLens ingest).
 
-A static token (the environment variable a city or company names, or its <ENV>_FILE) wins when set. Otherwise, when the identity
+A static token (the environment variable a city or company names, its <ENV>_FILE, or the credential saved in the app under that name) wins when set. Otherwise, when the identity
 provider is configured (CPSIM_OIDC_ISSUER plus the service client CPSIM_SERVICE_CLIENT_ID / CPSIM_SERVICE_CLIENT_SECRET[_FILE]), a
 short-lived token is minted with the client_credentials grant: one TokenSource per callee, asking only for that callee's scope.
 """
@@ -11,6 +11,8 @@ from collections.abc import Callable
 import httpx
 from apgkit.auth import TokenSource
 from apgkit.config import read_secret
+
+from . import credentials
 
 CITYPULSE_INGEST = "citypulse.ingest"
 TRUSTDESK_CLIENT = "trustdesk.requests.write"
@@ -40,7 +42,7 @@ def token_source(scope: str) -> TokenSource | None:
 
 def outbound_token(env: str, scope: str) -> str | Callable[[], str] | None:
     """The static token named by `env` if set, else a callable that returns a fresh service token for `scope`, else None."""
-    static = read_secret(env)
+    static = credentials.get(env)
     if static:
         return static
     src = token_source(scope)

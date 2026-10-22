@@ -7,8 +7,7 @@ import random
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
-from apgkit.config import read_secret
-
+from .. import credentials
 from ..model import SpecError
 from ..tokens import LLMGW_USE, PAGERLENS_INGEST, outbound_token
 from . import identity, llmgw, pagerlens, paybroker, trustdesk
@@ -128,11 +127,11 @@ def credential(wl):
         raise SpecError("CPSIM_SERVICE_CLIENT_SECRET is empty: the identity probe needs the simulator's service client")
     if not kind.token_env or not wl.target_url:
         return None
-    token = outbound_token(wl.token_env, kind.scope) if kind.scope else (read_secret(wl.token_env) or None)
+    token = outbound_token(wl.token_env, kind.scope) if kind.scope else (credentials.get(wl.token_env) or None)
     if not token:
         extra = (f" (or configure the service client of the identity provider for scope {kind.scope}: see CPSIM_SERVICE_CLIENT_SECRET)"
                  if kind.scope else "")
-        raise SpecError(f"the environment variable {wl.token_env} is empty: set it for {wl.target_url}{extra}")
+        raise SpecError(f"no credential for {wl.token_env}: save it under Settings > Credentials, or set that environment variable, for {wl.target_url}{extra}")
     return token
 
 
@@ -146,9 +145,9 @@ def build_sender(wl, *, token=None, transport=None, rng: random.Random | None = 
     if wl.kind == "paybroker":
         pub = None
         if wl.publishable_env and wl.target_url:
-            key = read_secret(wl.publishable_env)
+            key = credentials.get(wl.publishable_env)
             if not key:
-                raise SpecError(f"the environment variable {wl.publishable_env} is empty: set it to a publishable key")
+                raise SpecError(f"no credential for {wl.publishable_env}: save a publishable key under Settings > Credentials, or set that environment variable")
             pub = Http(wl.target_url, key, transport=transport)
         return paybroker.PaybrokerSender(params, http, rng, rate=wl.schedule.rate(), publishable_http=pub)
     if wl.kind == "llmgw":
