@@ -108,7 +108,10 @@ ranges (`198.51.100.0/24`, `203.0.113.0/24`, `192.0.2.0/24`), test cards only. I
 `capture_pct`, `refund_pct`, `complete_3ds_pct` (follow-ups on earlier payments, see below), `capture_method` (`automatic`, `manual` or the
 merchant's default), `seed`. **One unique test card per customer**, Luhn-valid in the reserved `999999` range: a card shared by customers trips
 PayBroker's velocity rules and everything is rejected. Regular customers pay with their own card, with a typical basket and an idempotency
-key; declines use PayBroker's public decline cards; the 3-D Secure and connector-failure scenarios use its documented cards; card
+key; the decline, 3-D Secure and connector-failure scenarios use a fresh unique card per payment in the reserved prefixes `99999901`
+(declined by the issuer), `99999902` (3-D Secure) and `99999903` (first connector fails, the cascade recovers). **This needs a PayBroker that
+maps those prefixes** (its README, "test cards"; an older one treats them as ordinary random-behaviour cards): the public shared numbers
+reach hundreds of payments an hour and PayBroker's fraud model rejects them for card velocity before they can show their behaviour. Card
 testing is a burst of tiny payments from one device with a fresh card each time; account takeover is a known customer on a new device in
 another country with a big pasted order; a few regular customers are brand-new accounts (`account_age_hours`). **Follow-ups**
 (`capture`, `refund`, completing the 3-D Secure challenge through `/api/3ds/{id}/complete`) are done on later ticks, at most `batch` per tick

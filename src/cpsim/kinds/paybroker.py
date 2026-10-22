@@ -6,10 +6,11 @@ by many customers trips PayBroker's velocity rules and everything is rejected): 
 unique Luhn-valid number in the reserved `999999` test range. Optional follow-ups act on earlier payments: capture, refund and
 completing the 3-D Secure challenge.
 
-Customers pay in shuffled rounds (never five times within a minute), the card-testing probes use addresses no customer has, and
-the shared public test cards (3-D Secure, declines, connector failure) are used at most four times a minute because PayBroker
-rejects a card on its fifth payment within a minute as velocity fraud: a scenario that would exceed that is sent as a regular
-payment (`demoted` in the status). Without these, a busy workload had regular customers rejected as fraud.
+Customers pay in shuffled rounds (never five times within a minute) and the card-testing probes use addresses no customer has.
+The decline, 3-D Secure and connector-failure scenarios each use a FRESH unique card per payment, in the reserved test prefixes
+PayBroker maps to those behaviours (`99999901` decline, `99999902` 3-D Secure, `99999903` first connector fails). The public
+shared numbers would reach hundreds of payments an hour, and PayBroker scores such a card as fraud (card velocity) before it can
+reach the issuer, the 3-D Secure step or the connector. This needs a PayBroker with those prefixes (see its README, "test cards").
 
 Declines (402) and fraud rejections (403) are EXPECTED outcomes and counted by class. Every identity is fictional: e-mail
 addresses on example.com/example.org, IP addresses in the documentation ranges (the "risky" country comes from
@@ -17,7 +18,6 @@ addresses on example.com/example.org, IP addresses in the documentation ranges (
 """
 import random
 import re
-import time
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import date
@@ -39,15 +39,15 @@ from .base import (
 TEST_BIN = "999999"
 HOMES = {"US": ("198.51.100", "USD"), "GB": ("203.0.113", "GBP"), "DE": ("192.0.2", "EUR")}   # country: (documentation range, currency)
 RISKY_COUNTRIES = ("RU", "NG")
-DECLINE_CARDS = ["4000000000000002", "4000000000009995", "4100000000000019"]   # PayBroker's public test cards
-THREE_DS_CARD = "4000002500003155"
-CONNECTOR_FAILURE_CARD = "4000000000000119"
+# Reserved prefixes inside PayBroker's test range, each carrying a behaviour (PayBroker's TEST_PREFIX_BEHAVIOR). Needs that PayBroker.
+DECLINE_PREFIX = "99999901"             # the issuer declines (do_not_honor)
+THREE_DS_PREFIX = "99999902"            # the issuer demands 3-D Secure
+CONNECTOR_FAILURE_PREFIX = "99999903"   # the first connector answers 5xx; the cascade recovers
+SCENARIO_PREFIX = {"decline": DECLINE_PREFIX, "three_ds": THREE_DS_PREFIX, "connector_failure": CONNECTOR_FAILURE_PREFIX}
 SCENARIOS = ("regular", "decline", "three_ds", "connector_failure", "card_testing", "account_takeover")
 DEFAULT_MIX = {"regular": 74, "decline": 8, "three_ds": 5, "connector_failure": 5, "card_testing": 5, "account_takeover": 3}
 PARAMS = {"mix", "customers", "payments_per_customer", "capture_pct", "refund_pct", "complete_3ds_pct", "capture_method", "publishable_env", "seed"}
 MAX_PENDING = 2000
-SHARED_CARDS = (*DECLINE_CARDS, THREE_DS_CARD, CONNECTOR_FAILURE_CARD)   # public test numbers: ONE card for many customers
-MAX_SHARED_PER_MIN = 4          # PayBroker's HARD_VELOCITY_CARD declines a card on its 5th payment within a minute
 PROBE_HOST = 251                # card-testing probes use .251 to .253 of 203.0.113.0/24; customers only get .2 to .250
 
 
@@ -61,11 +61,14 @@ def luhn_ok(number: str) -> bool:
     return total % 10 == 0
 
 
-def make_test_card(rng: random.Random, used: set[str] | None = None) -> str:
-    """A fresh Luhn-valid 16-digit number in PayBroker's reserved test range (999999...), unique within `used`."""
+def make_test_card(rng: random.Random, used: set[str] | None = None, prefix: str = TEST_BIN) -> str:
+    """A fresh Luhn-valid 16-digit number in PayBroker's reserved test range (999999...), unique within `used`. `prefix` is
+    `999999` (random behaviour) or one of the behaviour prefixes (`99999901`...)."""
     while True:
-        body = TEST_BIN + "".join(str(rng.randrange(10)) for _ in range(9))
+        body = prefix + "".join(str(rng.randrange(10)) for _ in range(15 - len(prefix)))
         number = next(body + str(c) for c in range(10) if luhn_ok(body + str(c)))
+        if prefix == TEST_BIN and number[:8] in SCENARIO_PREFIX.values():
+            continue        # an ordinary card must not land on a behaviour prefix by chance (3 in 1000 would)
         if used is None or number not in used:
             if used is not None:
                 used.add(number)
@@ -88,9 +91,10 @@ class Customer:
 @dataclass
 class PaymentOp:
     scenario: str
-    card: str                       # the test card number to tokenize (cached per number)
+    card: str                       # the test card number to tokenize (a customer's own card is cached; one-shot cards are not)
     body: dict                      # POST /v1/payments/authorize body, with `card_token` set at send time
     customer_index: int = -1
+    one_shot: bool = False          # a fresh card used for this payment only: do not keep its token
 
 
 @dataclass
@@ -111,8 +115,6 @@ class State:
     cursor: int = 0
     uses: dict[int, int] = field(default_factory=dict)  # payments made by the customer now at this index
     serial: int = 0                                      # the last customer number handed out (0: the pool was just built)
-    shared_use: dict[str, deque] = field(default_factory=dict)   # shared test card -> times of its recent payments
-    demoted: int = 0                                     # special scenarios turned into regular payments to respect the card cap
 
 
 def make_customer(rng: random.Random, serial: int, used: set[str]) -> Customer:
@@ -160,21 +162,9 @@ def next_customer(state: State, rng: random.Random) -> int:
     return state.order[state.cursor - 1]
 
 
-def shared_card_free(state: State, card: str, now: float) -> bool:
-    """May the public test `card` be used now? It is shared by all customers, so a rate that would send it five times in a minute
-    makes PayBroker reject the payments as velocity fraud; then the payment is a regular one instead."""
-    uses = state.shared_use.setdefault(card, deque())
-    while uses and now - uses[0] > 60:
-        uses.popleft()
-    if len(uses) >= MAX_SHARED_PER_MIN:
-        return False
-    uses.append(now)
-    return True
-
-
-def plan_payments(state: State, rng: random.Random, n: int, params: dict, now: float | None = None) -> list[PaymentOp]:
-    """The next `n` payments. Pure: same state and RNG, same output. Advances `state.seq`. With `now` (a monotonic time) the shared
-    test cards are used at most `MAX_SHARED_PER_MIN` times a minute: a scenario that would exceed that becomes a regular payment."""
+def plan_payments(state: State, rng: random.Random, n: int, params: dict) -> list[PaymentOp]:
+    """The next `n` payments. Pure: same state and RNG, same output. Advances `state.seq`. Decline, 3-D Secure and connector-failure
+    payments each get a fresh unique card of the matching prefix (nothing is shared, so no card ever has a velocity)."""
     mix, method = params["mix"], params["capture_method"]
     ops = []
     for _ in range(n):
@@ -185,15 +175,8 @@ def plan_payments(state: State, rng: random.Random, n: int, params: dict, now: f
         state.seq += 1
         body = _base_body(rng, c, key, method)
         card = c.card
-        if scenario == "decline":
-            card = rng.choice(DECLINE_CARDS)
-        elif scenario == "three_ds":
-            card = THREE_DS_CARD
-        elif scenario == "connector_failure":
-            card = CONNECTOR_FAILURE_CARD
-        if now is not None and card in SHARED_CARDS and not shared_card_free(state, card, now):
-            scenario, card = "regular", c.card
-            state.demoted += 1
+        if scenario in SCENARIO_PREFIX:
+            card = make_test_card(rng, state.used_cards, SCENARIO_PREFIX[scenario])
         if scenario == "card_testing":
             # one device, one address, a new test card every time, tiny amounts, a hurried pasted checkout
             probe = state.seq % 3
@@ -213,7 +196,7 @@ def plan_payments(state: State, rng: random.Random, n: int, params: dict, now: f
             # a brand-new account: young account, hurried checkout (a mild risk signal, usually still approved)
             body["customer"]["account_age_hours"] = round(rng.uniform(0.5, 12), 2)
             body["telemetry"]["checkout_duration_ms"] = rng.randint(6_000, 14_000)
-        ops.append(PaymentOp(scenario, card, body, idx if card == c.card else -1))
+        ops.append(PaymentOp(scenario, card, body, idx if card == c.card else -1, one_shot=card != c.card))
         if scenario != "card_testing":        # the probes use their own identities; everybody else pays as customer `c`
             retire_if_spent(state, rng, idx, params["payments_per_customer"])
     return ops
@@ -269,14 +252,14 @@ class PaybrokerSender(BaseSender):
         ops: list = []
         for _ in range(min(n, len(self.pending))):     # follow-ups of earlier payments go first, at most `n` per tick
             ops.append(self.pending.popleft())
-        return ops + plan_payments(self.state, self.rng, n, self.params, time.monotonic())
+        return ops + plan_payments(self.state, self.rng, n, self.params)
 
     def extra(self) -> dict:
-        return {"customers": len(self.state.customers), "pending_followups": len(self.pending), "followups": self.followups, "demoted": self.state.demoted,
+        return {"customers": len(self.state.customers), "pending_followups": len(self.pending), "followups": self.followups,
                 "setup_calls": self.setup_calls}
 
-    async def _token(self, card: str) -> tuple[str | None, Result | None]:
-        if card in self.tokens:
+    async def _token(self, card: str, keep: bool = True) -> tuple[str | None, Result | None]:
+        if keep and card in self.tokens:
             return self.tokens[card], None
         exp_year = date.today().year + 4
         client = self.pub or self.http
@@ -289,13 +272,15 @@ class PaybrokerSender(BaseSender):
             if res.outcome == "ok":
                 res = Result("client_error", error=f"HTTP {r.status_code} while tokenizing")
             return None, res
-        self.tokens[card] = r.json()["token"]
-        return self.tokens[card], None
+        token = r.json()["token"]
+        if keep:
+            self.tokens[card] = token
+        return token, None
 
     async def execute(self, op) -> Result:
         if isinstance(op, FollowUp):
             return await self._followup(op)
-        token, failed = await self._token(op.card)
+        token, failed = await self._token(op.card, keep=not op.one_shot)
         if failed:
             return failed
         op.body["payment_method"]["card_token"] = token

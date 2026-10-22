@@ -53,6 +53,7 @@ def test_customers_have_one_unique_luhn_test_card_each_in_the_999999_range():
     assert len(set(cards)) == 2000, "a shared card trips PayBroker's velocity rules"
     for n in cards:
         assert n.startswith("999999") and len(n) == 16 and targets.luhn_ok(n)
+        assert n[:8] not in ("99999901", "99999902", "99999903"), "an ordinary card must not land on a behaviour prefix"
     assert len({c.id for c in customers}) == 2000 and len({c.email for c in customers}) == 2000
     assert all(c.email.endswith("@example.com") for c in customers)
 
@@ -108,9 +109,10 @@ def test_the_mix_is_followed_and_each_scenario_looks_like_itself(created):
     for k, pct in want.items():
         assert abs(100 * share[k] / 6000 - pct) < 2.0, (k, share[k])
     by = {k: [op for op in ops if op.scenario == k] for k in want}
-    assert all(op.card in paybroker.DECLINE_CARDS for op in by["decline"])
-    assert all(op.card == paybroker.THREE_DS_CARD for op in by["three_ds"])
-    assert all(op.card == paybroker.CONNECTOR_FAILURE_CARD for op in by["connector_failure"])
+    for scenario, prefix in (("decline", "99999901"), ("three_ds", "99999902"), ("connector_failure", "99999903")):
+        cards = [op.card for op in by[scenario]]
+        assert cards and all(c.startswith(prefix) and len(c) == 16 and targets.luhn_ok(c) for c in cards), scenario
+        assert len(set(cards)) == len(cards), f"{scenario}: a fresh card every payment, nothing shared"
     probes = by["card_testing"]
     assert len({op.card for op in probes}) == len(probes), "every probe uses a fresh card"
     assert all(op.card.startswith("999999") and op.body["amount"] <= 900 and op.body["telemetry"]["pasted_card_number"] for op in probes)
@@ -145,30 +147,16 @@ def test_customers_pay_in_shuffled_rounds_so_nobody_bunches_up():
     assert picks[:25] != sorted(picks[:25])
 
 
-def test_a_shared_test_card_is_never_used_more_than_four_times_a_minute(created):
-    """PayBroker rejects a card on its 5th payment within a minute (HARD_VELOCITY_CARD): the shared 3-D Secure, decline and
-    connector-failure numbers are capped, and what would exceed it is a regular payment (counted in `demoted`)."""
-    p = pb_params(mix={"regular": 0, "decline": 0, "three_ds": 100, "connector_failure": 0, "card_testing": 0, "account_takeover": 0})
-    rng = random.Random(4)
-    state = paybroker.State("c1")
-    state.customers = paybroker.build_customers(rng, 60, state.used_cards)
-    ops = []
-    for tick in range(120):                                  # 3 payments a second for 40 seconds, everything asks for the 3DS card
-        ops += paybroker.plan_payments(state, rng, 3, p, now=1000.0 + tick / 3)
-    shared = [op for op in ops if op.card == paybroker.THREE_DS_CARD]
-    assert len(shared) == 4 * 1 and all(op.scenario == "three_ds" for op in shared), "only 4 inside the first minute"
-    others = [op for op in ops if op.card != paybroker.THREE_DS_CARD]
-    assert len(others) == len(ops) - 4 and all(op.scenario == "regular" for op in others)
-    assert state.demoted == len(others)
-    owners = {c.card: c.id for c in created}
-    assert all(owners[op.card] == op.body["customer"]["id"] for op in others), "a demoted payment is the customer's own card"
-    later = paybroker.plan_payments(state, rng, 3, p, now=1000.0 + 61)
-    assert sum(op.card == paybroker.THREE_DS_CARD for op in later) == 3, "a minute later the card is free again"
-
-
-def test_without_a_clock_the_plan_ignores_the_card_cap():
-    state, ops, _ = make_ops(600, seed=1, mix={"regular": 0, "decline": 0, "three_ds": 100, "connector_failure": 0, "card_testing": 0, "account_takeover": 0})
-    assert all(op.card == paybroker.THREE_DS_CARD for op in ops) and state.demoted == 0
+def test_no_card_is_ever_used_twice_except_a_customers_own():
+    """Nothing is shared: PayBroker scores a card with many payments an hour as fraud, so the special scenarios and the probes get a
+    new card each time and only regular customers reuse theirs (at most `payments_per_customer` times)."""
+    state, ops, _ = make_ops(4000, seed=3)
+    uses = Counter(op.card for op in ops)
+    assert all(uses[op.card] == 1 for op in ops if op.scenario != "regular" and op.one_shot)
+    assert max(uses.values()) <= 3 + 1
+    assert all(op.one_shot for op in ops if op.scenario in ("decline", "three_ds", "connector_failure", "card_testing"))
+    assert not any(op.one_shot for op in ops if op.scenario == "regular")
+    assert not hasattr(paybroker, "shared_card_free") and not hasattr(state, "demoted")
 
 
 def test_the_plan_is_reproducible_from_the_seed():
@@ -212,11 +200,11 @@ class PayBrokerMock:
             if self.fail:
                 return httpx.Response(self.fail[0], json=self.fail[1], headers=self.fail[2])
             number = self.tokens[body["payment_method"]["card_token"]]
-            if number in paybroker.DECLINE_CARDS:
+            if number.startswith("99999901"):
                 return httpx.Response(402, json={"error": {"code": "CARD_DECLINED"}})
             if body["amount"] >= 120_000:
                 return httpx.Response(403, json={"error": {"code": "FRAUD_REJECTED"}})
-            if number == paybroker.THREE_DS_CARD:
+            if number.startswith("99999902"):
                 return httpx.Response(200, json={"payment_id": "pay_3ds", "status": "REQUIRES_ACTION",
                                                  "action_required": {"type": "3DS_CHALLENGE", "redirect_url": "https://pb.example/3ds/ch_abc123"}})
             status = "AUTHORIZED" if body.get("capture_method") == "manual" else "CAPTURED"
@@ -251,6 +239,8 @@ def test_the_sender_tokenizes_each_card_once_and_classifies_the_answers():
     tokenize_calls = [c for c in mock.calls if c[1] == "/v1/vault/tokens"]
     assert len(tokenize_calls) == len(set(mock.tokens.values())) == s.setup_calls, "one token per distinct card number"
     assert all(r.latency is not None and r.latency >= 0 for r in results)
+    assert not any(n.startswith(("99999901", "99999902", "99999903")) for n in s.tokens), "one-shot scenario cards are not kept"
+    assert len(s.tokens) < s.setup_calls
 
 
 def test_follow_ups_capture_refund_and_complete_3ds():
