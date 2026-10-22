@@ -56,6 +56,7 @@ KINDS: dict[str, Kind] = {k.name: k for k in (
          env_hint="A merchant SECRET key (sk_test_...). Optionally a publishable key variable to tokenize like a browser.",
          fields=PB_MIX + [
              _f("customers", "Customer pool", "number", "Empty: sized to the rate. One unique test card per customer.", min=1, max=5000),
+             _f("payments_per_customer", "Payments per customer", "number", "Then a new customer takes the slot. 3 keeps PayBroker's fraud model from flagging a customer who pays again and again (a real shopper does not pay 5 times an hour).", min=1, max=20),
              _f("capture_pct", "Captured later (%)", "number", "Share of authorized payments captured on a later tick.", min=0, max=100),
              _f("refund_pct", "Refunded (%)", "number", "Share of captured payments refunded.", min=0, max=100),
              _f("complete_3ds_pct", "3-D Secure completed (%)", "number", "Share of challenges completed (succeeded).", min=0, max=100),

@@ -89,7 +89,7 @@ def luhn_ok(number: str) -> bool:
     return total % 10 == 0
 
 
-DOC_NETS = ("198.51.100.", "203.0.113.", "192.0.2.")
+DOC_NETS = ("198.51.100.", "203.0.113.", "192.0.2.", "2001:db8:")      # RFC 5737 and RFC 3849 documentation ranges
 
 
 # ---- LLM gateway: llm-gateway/API.md and src/llmgw/gateway.py ------------------------------------------------------------

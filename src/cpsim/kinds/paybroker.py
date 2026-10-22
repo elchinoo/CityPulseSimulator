@@ -44,7 +44,7 @@ THREE_DS_CARD = "4000002500003155"
 CONNECTOR_FAILURE_CARD = "4000000000000119"
 SCENARIOS = ("regular", "decline", "three_ds", "connector_failure", "card_testing", "account_takeover")
 DEFAULT_MIX = {"regular": 74, "decline": 8, "three_ds": 5, "connector_failure": 5, "card_testing": 5, "account_takeover": 3}
-PARAMS = {"mix", "customers", "capture_pct", "refund_pct", "complete_3ds_pct", "capture_method", "publishable_env", "seed"}
+PARAMS = {"mix", "customers", "payments_per_customer", "capture_pct", "refund_pct", "complete_3ds_pct", "capture_method", "publishable_env", "seed"}
 MAX_PENDING = 2000
 SHARED_CARDS = (*DECLINE_CARDS, THREE_DS_CARD, CONNECTOR_FAILURE_CARD)   # public test numbers: ONE card for many customers
 MAX_SHARED_PER_MIN = 4          # PayBroker's HARD_VELOCITY_CARD declines a card on its 5th payment within a minute
@@ -109,18 +109,25 @@ class State:
     seq: int = 0
     order: list[int] = field(default_factory=list)      # the customers in a shuffled round: nobody pays twice before everybody paid once
     cursor: int = 0
+    uses: dict[int, int] = field(default_factory=dict)  # payments made by the customer now at this index
+    serial: int = 0                                      # the last customer number handed out (0: the pool was just built)
     shared_use: dict[str, deque] = field(default_factory=dict)   # shared test card -> times of its recent payments
     demoted: int = 0                                     # special scenarios turned into regular payments to respect the card cap
 
 
+def make_customer(rng: random.Random, serial: int, used: set[str]) -> Customer:
+    """A shopper nobody has seen before: own id, device, test card and address. The address is in the IPv6 documentation range
+    (2001:db8::/32), which has room for every shopper of a long run; a small shared range would make PayBroker count many
+    shoppers as one address and reject them for its velocity."""
+    country = rng.choice(list(HOMES))
+    _, currency = HOMES[country]
+    ip = f"2001:db8:{(serial >> 16) & 0xffff:x}:{serial & 0xffff:x}::{rng.randint(1, 0xfff):x}"
+    return Customer(f"cus_wl_{serial:04d}", f"shopper{serial:04d}@example.com", ip, country, currency,
+                    f"dev_wl_{serial:04d}", make_test_card(rng, used), rng.choice([1500, 3200, 6400, 9900, 14000]))
+
+
 def build_customers(rng: random.Random, count: int, used: set[str]) -> list[Customer]:
-    out = []
-    for i in range(1, count + 1):
-        country = rng.choice(list(HOMES))
-        base, currency = HOMES[country]
-        out.append(Customer(f"cus_wl_{i:04d}", f"shopper{i:04d}@example.com", f"{base}.{rng.randint(2, 250)}", country, currency,
-                            f"dev_wl_{i:04d}", make_test_card(rng, used), rng.choice([1500, 3200, 6400, 9900, 14000])))
-    return out
+    return [make_customer(rng, i, used) for i in range(1, count + 1)]
 
 
 def pool_size(rate: float, customers: int | None) -> int:
@@ -207,13 +214,27 @@ def plan_payments(state: State, rng: random.Random, n: int, params: dict, now: f
             body["customer"]["account_age_hours"] = round(rng.uniform(0.5, 12), 2)
             body["telemetry"]["checkout_duration_ms"] = rng.randint(6_000, 14_000)
         ops.append(PaymentOp(scenario, card, body, idx if card == c.card else -1))
+        if scenario != "card_testing":        # the probes use their own identities; everybody else pays as customer `c`
+            retire_if_spent(state, rng, idx, params["payments_per_customer"])
     return ops
+
+
+def retire_if_spent(state: State, rng: random.Random, idx: int, limit: int) -> None:
+    """A shopper who has paid `limit` times leaves and a new one takes the slot. PayBroker counts a customer's, device's, card's and
+    address's payments per hour, and a handful already scores as fraud (a shopper with 5 payments an hour is declined), so a small
+    pool reused for hours ends with every payment declined. Real shoppers come and go."""
+    state.uses[idx] = state.uses.get(idx, 0) + 1
+    if state.uses[idx] >= limit:
+        state.serial = max(state.serial, len(state.customers)) + 1
+        state.customers[idx] = make_customer(rng, state.serial, state.used_cards)
+        state.uses[idx] = 0
 
 
 def validate(params: dict) -> dict:
     unknown_params(params, PARAMS)
     out = {"mix": p_mix(params, "mix", DEFAULT_MIX),
            "customers": p_int(params, "customers", None, 1, 5000),
+           "payments_per_customer": p_int(params, "payments_per_customer", 3, 1, 20),
            "capture_pct": p_num(params, "capture_pct", 0, 0, 100),
            "refund_pct": p_num(params, "refund_pct", 0, 0, 100),
            "complete_3ds_pct": p_num(params, "complete_3ds_pct", 0, 0, 100),

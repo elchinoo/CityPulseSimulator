@@ -36,6 +36,15 @@ def pb_params(**kw):
     return paybroker.validate(kw)
 
 
+@pytest.fixture
+def created(monkeypatch):
+    """Every customer made during a test, retired ones included: slots are refilled when a customer has paid enough."""
+    made = []
+    real = paybroker.make_customer
+    monkeypatch.setattr(paybroker, "make_customer", lambda *a, **k: made.append(real(*a, **k)) or made[-1])
+    return made
+
+
 def test_customers_have_one_unique_luhn_test_card_each_in_the_999999_range():
     rng = random.Random(1)
     used: set[str] = set()
@@ -92,7 +101,7 @@ def test_a_bad_body_would_be_caught_by_the_schema_copy():
         targets.PbAuthorize.model_validate(body)
 
 
-def test_the_mix_is_followed_and_each_scenario_looks_like_itself():
+def test_the_mix_is_followed_and_each_scenario_looks_like_itself(created):
     state, ops, p = make_ops(6000, seed=2)
     share = Counter(op.scenario for op in ops)
     want = p["mix"]
@@ -107,7 +116,7 @@ def test_the_mix_is_followed_and_each_scenario_looks_like_itself():
     assert all(op.card.startswith("999999") and op.body["amount"] <= 900 and op.body["telemetry"]["pasted_card_number"] for op in probes)
     assert all(op.body["customer"]["account_age_hours"] < 3.1 for op in probes)
     assert len({op.body["telemetry"]["device_fingerprint"] for op in probes}) == 1
-    owners = {c.card: c for c in state.customers}
+    owners = {c.card: c for c in created}
     for op in by["regular"]:
         assert owners[op.card].id == op.body["customer"]["id"], "a regular customer pays with their own card"
     takeovers = by["account_takeover"]
@@ -136,7 +145,7 @@ def test_customers_pay_in_shuffled_rounds_so_nobody_bunches_up():
     assert picks[:25] != sorted(picks[:25])
 
 
-def test_a_shared_test_card_is_never_used_more_than_four_times_a_minute():
+def test_a_shared_test_card_is_never_used_more_than_four_times_a_minute(created):
     """PayBroker rejects a card on its 5th payment within a minute (HARD_VELOCITY_CARD): the shared 3-D Secure, decline and
     connector-failure numbers are capped, and what would exceed it is a regular payment (counted in `demoted`)."""
     p = pb_params(mix={"regular": 0, "decline": 0, "three_ds": 100, "connector_failure": 0, "card_testing": 0, "account_takeover": 0})
@@ -151,7 +160,7 @@ def test_a_shared_test_card_is_never_used_more_than_four_times_a_minute():
     others = [op for op in ops if op.card != paybroker.THREE_DS_CARD]
     assert len(others) == len(ops) - 4 and all(op.scenario == "regular" for op in others)
     assert state.demoted == len(others)
-    owners = {c.card: c.id for c in state.customers}
+    owners = {c.card: c.id for c in created}
     assert all(owners[op.card] == op.body["customer"]["id"] for op in others), "a demoted payment is the customer's own card"
     later = paybroker.plan_payments(state, rng, 3, p, now=1000.0 + 61)
     assert sum(op.card == paybroker.THREE_DS_CARD for op in later) == 3, "a minute later the card is free again"
@@ -576,3 +585,30 @@ def test_every_kind_has_defaults_that_validate_and_fields_the_ui_can_render():
             assert parse_workload({"name": "p", "kind": k.name, "target_url": "https://x.example", "schedule": sched, "params": params})
     with pytest.raises(SpecError, match="Cities"):
         kinds.kind_of("citypulse")
+
+
+def test_a_customer_leaves_after_a_few_payments_so_a_long_run_never_looks_like_a_velocity_attack(created):
+    """PayBroker's fraud model declines a customer with ~5 payments an hour (and a card, device or address with as many), so a small
+    pool reused for hours ended with every payment declined. Each shopper now pays a few times and is replaced by a new one."""
+    state, ops, _ = make_ops(2000, seed=11, payments_per_customer=3, mix={"regular": 100})
+    per_customer: dict[str, int] = {}
+    for op in ops:
+        if op.scenario == "card_testing":      # the probes are three fixed identities on purpose
+            continue
+        cid = op.body["customer"]["id"]
+        per_customer[cid] = per_customer.get(cid, 0) + 1
+    assert max(per_customer.values()) <= 3, "nobody pays more than three times"
+    assert len(per_customer) > 600, "about a third as many shoppers as payments, not the same 60 again and again"
+    shoppers = [c for c in created]
+    assert len({c.card for c in shoppers}) == len(shoppers) and len({c.device for c in shoppers}) == len(shoppers)
+    assert len({c.ip for c in shoppers}) == len(shoppers), "every shopper has an address of their own"
+    assert all(c.ip.startswith("2001:db8:") for c in shoppers), "documentation range only (RFC 3849)"
+    assert len(state.customers) == 60, "the pool keeps its size"
+
+
+def test_payments_per_customer_is_validated_and_defaults_to_three():
+    assert paybroker.validate({})["payments_per_customer"] == 3
+    assert paybroker.validate({"payments_per_customer": 1})["payments_per_customer"] == 1
+    for bad in (0, 21, "many"):
+        with pytest.raises(kinds.SpecError):
+            paybroker.validate({"payments_per_customer": bad})
