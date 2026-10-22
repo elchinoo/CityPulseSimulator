@@ -6,12 +6,18 @@ by many customers trips PayBroker's velocity rules and everything is rejected): 
 unique Luhn-valid number in the reserved `999999` test range. Optional follow-ups act on earlier payments: capture, refund and
 completing the 3-D Secure challenge.
 
+Customers pay in shuffled rounds (never five times within a minute), the card-testing probes use addresses no customer has, and
+the shared public test cards (3-D Secure, declines, connector failure) are used at most four times a minute because PayBroker
+rejects a card on its fifth payment within a minute as velocity fraud: a scenario that would exceed that is sent as a regular
+payment (`demoted` in the status). Without these, a busy workload had regular customers rejected as fraud.
+
 Declines (402) and fraud rejections (403) are EXPECTED outcomes and counted by class. Every identity is fictional: e-mail
 addresses on example.com/example.org, IP addresses in the documentation ranges (the "risky" country comes from
 `telemetry.ip_country`, not from a real address).
 """
 import random
 import re
+import time
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import date
@@ -40,6 +46,9 @@ SCENARIOS = ("regular", "decline", "three_ds", "connector_failure", "card_testin
 DEFAULT_MIX = {"regular": 74, "decline": 8, "three_ds": 5, "connector_failure": 5, "card_testing": 5, "account_takeover": 3}
 PARAMS = {"mix", "customers", "capture_pct", "refund_pct", "complete_3ds_pct", "capture_method", "publishable_env", "seed"}
 MAX_PENDING = 2000
+SHARED_CARDS = (*DECLINE_CARDS, THREE_DS_CARD, CONNECTOR_FAILURE_CARD)   # public test numbers: ONE card for many customers
+MAX_SHARED_PER_MIN = 4          # PayBroker's HARD_VELOCITY_CARD declines a card on its 5th payment within a minute
+PROBE_HOST = 251                # card-testing probes use .251 to .253 of 203.0.113.0/24; customers only get .2 to .250
 
 
 def luhn_ok(number: str) -> bool:
@@ -98,6 +107,10 @@ class State:
     customers: list[Customer] = field(default_factory=list)
     used_cards: set[str] = field(default_factory=set)
     seq: int = 0
+    order: list[int] = field(default_factory=list)      # the customers in a shuffled round: nobody pays twice before everybody paid once
+    cursor: int = 0
+    shared_use: dict[str, deque] = field(default_factory=dict)   # shared test card -> times of its recent payments
+    demoted: int = 0                                     # special scenarios turned into regular payments to respect the card cap
 
 
 def build_customers(rng: random.Random, count: int, used: set[str]) -> list[Customer]:
@@ -129,13 +142,37 @@ def _base_body(rng: random.Random, c: Customer, key: str, method: str | None) ->
     return body
 
 
-def plan_payments(state: State, rng: random.Random, n: int, params: dict) -> list[PaymentOp]:
-    """The next `n` payments. Pure: same state and RNG, same output. Advances `state.seq`."""
+def next_customer(state: State, rng: random.Random) -> int:
+    """The next customer in a shuffled round. Each customer's payments are evenly spaced (a random pick bunches them up and a few
+    customers pay five times in a minute, which PayBroker's per-user velocity rule rejects as fraud)."""
+    if state.cursor >= len(state.order) or len(state.order) != len(state.customers):
+        state.order = list(range(len(state.customers)))
+        rng.shuffle(state.order)
+        state.cursor = 0
+    state.cursor += 1
+    return state.order[state.cursor - 1]
+
+
+def shared_card_free(state: State, card: str, now: float) -> bool:
+    """May the public test `card` be used now? It is shared by all customers, so a rate that would send it five times in a minute
+    makes PayBroker reject the payments as velocity fraud; then the payment is a regular one instead."""
+    uses = state.shared_use.setdefault(card, deque())
+    while uses and now - uses[0] > 60:
+        uses.popleft()
+    if len(uses) >= MAX_SHARED_PER_MIN:
+        return False
+    uses.append(now)
+    return True
+
+
+def plan_payments(state: State, rng: random.Random, n: int, params: dict, now: float | None = None) -> list[PaymentOp]:
+    """The next `n` payments. Pure: same state and RNG, same output. Advances `state.seq`. With `now` (a monotonic time) the shared
+    test cards are used at most `MAX_SHARED_PER_MIN` times a minute: a scenario that would exceed that becomes a regular payment."""
     mix, method = params["mix"], params["capture_method"]
     ops = []
     for _ in range(n):
         scenario = pick_weighted(rng, mix)
-        idx = rng.randrange(len(state.customers))
+        idx = next_customer(state, rng)
         c = state.customers[idx]
         key = f"wl-{state.run_id}-{state.seq:07d}"
         state.seq += 1
@@ -147,12 +184,15 @@ def plan_payments(state: State, rng: random.Random, n: int, params: dict) -> lis
             card = THREE_DS_CARD
         elif scenario == "connector_failure":
             card = CONNECTOR_FAILURE_CARD
-        elif scenario == "card_testing":
+        if now is not None and card in SHARED_CARDS and not shared_card_free(state, card, now):
+            scenario, card = "regular", c.card
+            state.demoted += 1
+        if scenario == "card_testing":
             # one device, one address, a new test card every time, tiny amounts, a hurried pasted checkout
             probe = state.seq % 3
             card = make_test_card(rng, state.used_cards)
             body["customer"] = {"id": f"cus_wl_probe_{state.run_id}_{probe}", "email": "probe@example.com",
-                                "ip_address": f"203.0.113.{200 + probe}", "account_age_hours": round(rng.uniform(0.1, 3), 2)}
+                                "ip_address": f"203.0.113.{PROBE_HOST + probe}", "account_age_hours": round(rng.uniform(0.1, 3), 2)}
             body["telemetry"] = {"device_fingerprint": f"dev_wl_probe_{state.run_id}", "checkout_duration_ms": rng.randint(900, 2500),
                                  "user_agent": "Mozilla/5.0 (workload)", "pasted_card_number": True, "ip_country": rng.choice(RISKY_COUNTRIES)}
             body["amount"] = rng.randint(100, 900)
@@ -208,10 +248,10 @@ class PaybrokerSender(BaseSender):
         ops: list = []
         for _ in range(min(n, len(self.pending))):     # follow-ups of earlier payments go first, at most `n` per tick
             ops.append(self.pending.popleft())
-        return ops + plan_payments(self.state, self.rng, n, self.params)
+        return ops + plan_payments(self.state, self.rng, n, self.params, time.monotonic())
 
     def extra(self) -> dict:
-        return {"customers": len(self.state.customers), "pending_followups": len(self.pending), "followups": self.followups,
+        return {"customers": len(self.state.customers), "pending_followups": len(self.pending), "followups": self.followups, "demoted": self.state.demoted,
                 "setup_calls": self.setup_calls}
 
     async def _token(self, card: str) -> tuple[str | None, Result | None]:

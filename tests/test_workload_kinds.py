@@ -116,6 +116,52 @@ def test_the_mix_is_followed_and_each_scenario_looks_like_itself():
     assert any("account_age_hours" in op.body["customer"] for op in by["regular"]), "some new accounts"
 
 
+def test_probe_addresses_never_collide_with_a_customers_address():
+    """A customer who shares an address with the card-testing probes inherits their velocity and is rejected as fraud."""
+    state, ops, _ = make_ops(3000, seed=9)
+    probe_ips = {op.body["customer"]["ip_address"] for op in ops if op.scenario == "card_testing"}
+    assert probe_ips and len(probe_ips) <= 3
+    customer_ips = {c.ip for c in paybroker.build_customers(random.Random(3), 5000, set())}
+    assert not probe_ips & customer_ips
+    assert all(op.body["customer"]["ip_address"].startswith(targets.DOC_NETS) for op in ops)
+
+
+def test_customers_pay_in_shuffled_rounds_so_nobody_bunches_up():
+    state = paybroker.State("r1")
+    state.customers = paybroker.build_customers(random.Random(1), 25, state.used_cards)
+    rng = random.Random(2)
+    picks = [paybroker.next_customer(state, rng) for _ in range(75)]
+    for k in range(3):
+        assert sorted(picks[k * 25:(k + 1) * 25]) == list(range(25)), "each round visits every customer once"
+    assert picks[:25] != sorted(picks[:25])
+
+
+def test_a_shared_test_card_is_never_used_more_than_four_times_a_minute():
+    """PayBroker rejects a card on its 5th payment within a minute (HARD_VELOCITY_CARD): the shared 3-D Secure, decline and
+    connector-failure numbers are capped, and what would exceed it is a regular payment (counted in `demoted`)."""
+    p = pb_params(mix={"regular": 0, "decline": 0, "three_ds": 100, "connector_failure": 0, "card_testing": 0, "account_takeover": 0})
+    rng = random.Random(4)
+    state = paybroker.State("c1")
+    state.customers = paybroker.build_customers(rng, 60, state.used_cards)
+    ops = []
+    for tick in range(120):                                  # 3 payments a second for 40 seconds, everything asks for the 3DS card
+        ops += paybroker.plan_payments(state, rng, 3, p, now=1000.0 + tick / 3)
+    shared = [op for op in ops if op.card == paybroker.THREE_DS_CARD]
+    assert len(shared) == 4 * 1 and all(op.scenario == "three_ds" for op in shared), "only 4 inside the first minute"
+    others = [op for op in ops if op.card != paybroker.THREE_DS_CARD]
+    assert len(others) == len(ops) - 4 and all(op.scenario == "regular" for op in others)
+    assert state.demoted == len(others)
+    owners = {c.card: c.id for c in state.customers}
+    assert all(owners[op.card] == op.body["customer"]["id"] for op in others), "a demoted payment is the customer's own card"
+    later = paybroker.plan_payments(state, rng, 3, p, now=1000.0 + 61)
+    assert sum(op.card == paybroker.THREE_DS_CARD for op in later) == 3, "a minute later the card is free again"
+
+
+def test_without_a_clock_the_plan_ignores_the_card_cap():
+    state, ops, _ = make_ops(600, seed=1, mix={"regular": 0, "decline": 0, "three_ds": 100, "connector_failure": 0, "card_testing": 0, "account_takeover": 0})
+    assert all(op.card == paybroker.THREE_DS_CARD for op in ops) and state.demoted == 0
+
+
 def test_the_plan_is_reproducible_from_the_seed():
     a = [op.body for op in make_ops(50, seed=11)[1]]
     b = [op.body for op in make_ops(50, seed=11)[1]]
