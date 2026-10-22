@@ -165,7 +165,8 @@ async def _run_workloads(path: str, only: str | None, seconds: float | None, dry
         wl = parse_workload(w)
         rt.store.save_workload(wl.name, wl.to_dict())
         names.append(wl.name)
-    targets = [(w.name, w.target_url) for w in rt.workloads().values()] + [(c.name, c.target_url) for c in cities]
+    # a trustdesk workload sends to its company's target_url (checked below), it has no URL of its own
+    targets = [(w.name, w.target_url) for w in rt.workloads().values() if w.kind != "trustdesk"] + [(c.name, c.target_url) for c in cities]
     used = {w.params["company"] for w in rt.workloads().values() if w.kind == "trustdesk"}
     targets += [(c.name, c.target_url) for c in rt.companies().values() if c.name in used]
     for name, url in targets:

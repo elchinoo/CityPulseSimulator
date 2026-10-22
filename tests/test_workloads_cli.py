@@ -233,6 +233,32 @@ workloads:
     assert "hr trustdesk every 5s" in r.stdout and "generated=5" in r.stdout
 
 
+def test_a_trustdesk_workload_sends_to_its_companys_target_not_its_own(tmp_path):
+    """The workload has no target_url (the company has): a real run must not refuse it as having none."""
+    td = Standin(lambda request: httpx.Response(401, json={"detail": "bad token"}))
+    try:
+        f = write(tmp_path, f"""
+companies:
+  - name: acme
+    target_url: {td.url}
+    token_env: TRUSTDESK_CLIENT_TOKEN
+    seed: 4
+    employees: {{new: 1, tenured: 1}}
+    requests: {{vacation: 1}}
+workloads:
+  - name: hr
+    kind: trustdesk
+    params: {{company: acme}}
+    schedule: {{interval: 5, ticks: 1}}
+""")
+        r = cpsim("workloads", "run", f, "--seconds", "8", "--status-every", "2", environ=env(TRUSTDESK_CLIENT_TOKEN="td_client_x"))
+        assert "has no target_url" not in r.stderr, r.stderr
+        assert r.returncode == 3, (r.returncode, r.stderr)
+        assert td.seen and td.seen[0][2] == "Bearer td_client_x"
+    finally:
+        td.close()
+
+
 def test_the_older_headless_commands_need_no_postgres_either(tmp_path):
     city = write(tmp_path, """
 name: tiny
