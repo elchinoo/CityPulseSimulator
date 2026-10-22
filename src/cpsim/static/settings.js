@@ -78,6 +78,20 @@ function credentialsCard() {
     note, box];
 }
 
+// Read-only: the six addresses ecoctl (or the person who deployed this app) gave it. A city, company or workload can follow them.
+function fleetCard() {
+  const box = h("div", {});
+  api("/api/fleet").then((d) => {
+    const rows = (d.vars || []).map((v) => h("tr", {}, h("td", { class: "title" }, h("code", {}, v.name)), h("td", {}, v.label),
+      h("td", {}, h("span", { class: `st ${v.set ? "ok" : "offline"}` }, v.set ? "set" : "not set")), h("td", { class: "wrap" }, v.set ? v.value : "")));
+    box.replaceChildren(h("div", { class: "card flush" }, h("table", { id: "fleet-table" },
+      h("thead", {}, h("tr", {}, ...["Variable", "App", "State", "Address"].map((t) => h("th", {}, t)))), h("tbody", {}, ...rows))));
+  }).catch((err) => box.replaceChildren(h("p", { class: "error" }, err.message)));
+  return [h("h2", { class: "section-title" }, "Fleet"),
+    h("p", { class: "muted" }, "The addresses of the other apps, given to this app when ecoctl deploys it. A target written as ${CITYPULSE_URL} (use the button next to the URL field) follows them: when an app is recreated and this one is redeployed, nothing needs retyping. These are URLs, not secrets."),
+    box];
+}
+
 export async function initSettings() {
   const s = await api("/api/session");
   const has = s.has_admin_password;
@@ -101,5 +115,5 @@ export async function initSettings() {
   fill($("view-settings"), h("h1", {}, "Settings"),
     h("p", { class: "muted" }, "Cities and companies are stored in the linked Postgres database, so they survive restarts. A city, company or workload only names the credential it uses (an environment variable name); the value comes from the environment or from Settings > Credentials."),
     h("h2", { class: "section-title" }, "Admin password"), h("div", { class: "card" }, form),
-    ...credentialsCard(), ...tokensCard());
+    ...fleetCard(), ...credentialsCard(), ...tokensCard());
 }

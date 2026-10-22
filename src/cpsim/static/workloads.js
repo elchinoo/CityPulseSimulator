@@ -1,5 +1,6 @@
 import { api } from "/kit/api.js";
 import { guard } from "/static/perm.js";
+import { fleetChoice, targetText, withFleet } from "/static/fleet.js";
 import { $, field, fill, h, toast } from "/kit/ui.js";
 
 let catalog = null;
@@ -10,6 +11,7 @@ const BAD = new Set(["auth_error", "client_error", "server_error", "unavailable"
 
 export function stopWorkloads() { clearInterval(timer); }
 
+const fleetLabel = (name, fleet = []) => fleet.find((f) => f.name === name)?.label || name;
 const kindOf = (key) => catalog.kinds.find((k) => k.key === key);
 const ms = (v) => (v == null ? "n/a" : `${Math.round(v * 1000)} ms`);
 const getPath = (obj, path) => path.split(".").reduce((o, k) => (o == null ? o : o[k]), obj);
@@ -26,7 +28,7 @@ function listTable(list) {
   const rows = list.map((w) => {
     const s = w.stats;
     return h("tr", { class: "clickable", onclick: () => { location.hash = `#workloads/${w.name}`; } },
-      h("td", { class: "title" }, w.name), h("td", {}, kindOf(w.kind)?.label || w.kind), h("td", { class: "muted" }, w.target_url || "generate only"),
+      h("td", { class: "title" }, w.name), h("td", {}, kindOf(w.kind)?.label || w.kind), h("td", { class: "muted" }, targetText(w)),
       h("td", { class: "num" }, `${w.batch} / ${w.interval} s`),
       h("td", {}, h("span", { class: `st ${STATE[w.state] || "offline"}` }, w.state)),
       h("td", { class: "num" }, s ? s.items.toLocaleString() : "0"), h("td", { class: "num" }, s ? s.skipped : "0"),
@@ -187,7 +189,8 @@ async function renderWorkload(box, name) {
   const form = h("form", { onsubmit: async (e) => { e.preventDefault(); await save(); } },
     h("p", { class: "muted" }, kind.description),
     h("div", { class: "btns wrap tight" }, h("span", { class: "muted" }, "Presets:"), ...kind.presets.map((p) => h("button", { class: "secondary small", type: "button", disabled: running, onclick: () => preset(p) }, p.label))),
-    h("div", { class: "grid2" }, w.kind === "trustdesk" ? null : field("Target URL", url, "https, or http only for this machine. Empty means generate only: nothing is sent."),
+    h("div", { class: "grid2" }, w.kind === "trustdesk" ? null : withFleet(field("Target URL", url, "https, or http only for this machine. Empty means generate only: nothing is sent. Or follow the fleet: the address is looked up when the workload starts."),
+      catalog.kind_vars?.[w.kind] ? fleetChoice(url, catalog.kind_vars[w.kind], fleetLabel(catalog.kind_vars[w.kind], catalog.fleet), catalog.fleet || [], running) : h("span", {})),
       tokenEnv ? field("Credential variable", tokenEnv, `The NAME of the environment variable that holds the credential. ${kind.env_hint} The value itself is never stored here.`) : h("p", { class: "hint" }, kind.env_hint)),
     pubEnv ? field("Publishable key variable", pubEnv, "Tokenize cards with a publishable key, like a browser would. The name only.") : null,
     h("h3", {}, "Schedule"),

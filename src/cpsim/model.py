@@ -7,6 +7,8 @@ from dataclasses import asdict, dataclass, field
 from urllib.parse import urlparse
 
 from .catalog import DISTRICT_ID, TYPES
+from .errors import SpecError
+from .fleet import check_reference, is_reference
 from .protocols import PROTOCOLS
 from .protocols.image import MAX_CHANNELS
 
@@ -26,10 +28,6 @@ ENV_NAME = re.compile(r"^[A-Z][A-Z0-9_]{0,63}$")
 MAX_GROUPS, MAX_GROUP_COUNT, MAX_CITY_SENSORS = 100, 5000, 10_000
 # How many devices an address space allows on one server (one protocol endpoint per city).
 DEVICE_LIMITS = {"modbus_tcp": 247, "ethernet_ip": 1000, "ethercat": 4096, "profinet": 4096, "profibus": 125}
-
-
-class SpecError(ValueError):
-    pass
 
 
 @dataclass
@@ -81,6 +79,8 @@ def check_target(url: str, allow_http: bool = False) -> str:
     local stand-ins); no credentials, no link-local."""
     if not url:
         return ""
+    if is_reference(url):
+        return check_reference(url)       # stored as written; the rules below apply to what it resolves to, when something starts
     u = urlparse(url)
     if u.scheme not in ("http", "https") or not u.hostname or u.username or u.password or u.query or u.fragment:
         raise SpecError("target_url must be an http(s) URL without credentials, query or fragment")

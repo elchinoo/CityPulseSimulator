@@ -18,6 +18,34 @@ data reach CityPulse the way it would from a real plant: through **industrial pr
 * **Random bursts** driven by a percentage per group (below), plus a *burst the whole city* button.
 * **Monitored by PagerLens**: `/healthz`, `/metrics` (scope-limited token) and an optional self-report.
 
+## Following the fleet's addresses: fleet references
+
+Every AgentPG sandbox URL contains its sandbox id, so recreating an app changes its address. A city, company or workload can therefore
+name an app of the fleet instead of a URL. The syntax is exactly one of these, as the whole Target URL (nothing before or after it):
+
+```
+${CITYPULSE_URL}   ${PAYBROKER_URL}   ${TRUSTDESK_URL}   ${PAGERLENS_URL}   ${LLMGW_URL}   ${IDENTITY_URL}
+```
+
+Any other name (`${HOME}`, `${DATABASE_URL}`), a default (`${X:-...}`), a prefix or suffix (`https://${X}`, `${X}/api`) or a nested one is refused
+(422 in the API). The reference is **stored as written** and looked up in the app's environment each time something **starts**
+(a city, a company run or schedule, a workload), so when ecoctl recreates an app and redeploys the simulator with fresh variables
+(`ecoctl apply` does that; see its `uses:` list), everything follows without a single edit. A reference that cannot be resolved fails
+the start with `CITYPULSE_URL is not set on this app; set the URL by hand or deploy it with ecoctl`.
+
+The URL rules apply to the **resolved** address: https, or http for this machine (workloads also honour `CPSIM_ALLOW_HTTP_TARGETS`), no
+credentials, no link-local; the credential is only ever sent to that address. Literal URLs saved before keep working unchanged.
+
+Where it shows: every city, company and workload in the API has a read-only `target` object next to `target_url`
+(`{reference, resolved_url, resolves, problem}`; a PUT ignores it, so a GET can be sent back); the tables show `${CITYPULSE_URL} → https://...`;
+next to the Target URL field a **Use the fleet's CityPulse** (PayBroker, TrustDesk, PagerLens, LLM gateway, identity provider) button puts the
+reference in, and Settings has a read-only **Fleet** card (`GET /api/fleet`) listing which of the six variables are set and their values (URLs, not secrets).
+Generated cities (the form, `POST /api/cities/generate`, `cpsim cities generate`), the fixed presets and the Live feed preset default to
+`${CITYPULSE_URL}` when that variable is set on the app (else empty, as before; pass `target_url: ""` to force empty).
+
+Headless: `cpsim workloads run` keeps a file's `target_url: ${PAYBROKER_URL}` as a reference and resolves it with the same code at start
+(unset: exit 2 with the message above and the `--dry-run` hint). The older `${NAME:-default}` expansion of any other variable in a file is unchanged.
+
 ## Demo cities that differ: the generator
 
 A fixed preset gives the very same city every time. To get cities that differ, **generate** them: each city makes up its own

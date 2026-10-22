@@ -4,6 +4,7 @@ A city's schedule is `poll_interval` (how often the gateway polls its field devi
 readings of one sensor). The "live feed" preset puts every sensor on `direct` (no protocol sockets, so it runs in a container with
 nothing published) and sets both to the interval you ask for: a reading from each of `sensors` sensors every `interval` seconds.
 """
+from . import fleet
 from .model import City, SpecError, check_target, parse_city
 
 # type, share of the sensors, district
@@ -12,9 +13,11 @@ LIVE_FEED_MIX = [("temperature", 20, "d01"), ("humidity", 10, "d01"), ("air_qual
 FIELDS = {"name", "kind", "target_url", "token_env", "params", "schedule"}
 
 
-def live_feed(name: str, target_url: str = "", token_env: str = "CITYPULSE_INGEST_TOKEN", interval: float = 5.0, sensors: int = 60,
+def live_feed(name: str, target_url: str | None = None, token_env: str = "CITYPULSE_INGEST_TOKEN", interval: float = 5.0, sensors: int = 60,
               seed: int | None = None) -> dict:
-    """The spec of a city that sends `sensors` readings every `interval` seconds (1 to 3600)."""
+    """The spec of a city that sends `sensors` readings every `interval` seconds (1 to 3600). `target_url` None: `${CITYPULSE_URL}` when set."""
+    if target_url is None:
+        target_url = fleet.default_target()
     if isinstance(sensors, bool) or not isinstance(sensors, int) or not 8 <= sensors <= 10_000:
         raise SpecError("params.sensors must be a whole number from 8 to 10000")
     groups, left = [], sensors
@@ -43,5 +46,5 @@ def city_from_workload(d: dict) -> City:
     interval = sched.get("interval", 5)
     if isinstance(interval, bool) or not isinstance(interval, (int, float)) or not 1 <= interval <= 3600:
         raise SpecError("schedule.interval must be a number between 1 and 3600")
-    return parse_city(live_feed(d.get("name"), check_target(d.get("target_url") or ""), d.get("token_env") or "CITYPULSE_INGEST_TOKEN",
+    return parse_city(live_feed(d.get("name"), check_target(d["target_url"] or "") if "target_url" in d else None, d.get("token_env") or "CITYPULSE_INGEST_TOKEN",
                                 float(interval), params.get("sensors", 60), params.get("seed")))

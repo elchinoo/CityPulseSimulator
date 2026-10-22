@@ -1,5 +1,6 @@
 import { api } from "/kit/api.js";
 import { guard } from "/static/perm.js";
+import { fleetChoice, targetText, withFleet } from "/static/fleet.js";
 import { $, field, fill, h, toast } from "/kit/ui.js";
 
 let catalog = null;
@@ -23,7 +24,7 @@ async function renderList(box) {
   };
   const rows = list.map((c) => h("tr", { class: "clickable", onclick: () => { location.hash = `#companies/${c.name}`; } },
     h("td", { class: "title" }, c.name), h("td", { class: "num" }, c.employees.toLocaleString()), h("td", { class: "num" }, c.requests.toLocaleString()),
-    h("td", { class: "num" }, c.types), h("td", { class: "muted" }, c.target_url || "generate only"),
+    h("td", { class: "num" }, c.types), h("td", { class: "muted" }, targetText(c)),
     h("td", {}, h("span", { class: `st ${STATE[c.state] || "offline"}` }, c.state))));
   fill(box, h("h1", {}, "Companies"),
     h("p", { class: "muted" }, "A company is a simulated employer. It creates employees (new hires and long-serving staff) and sends the number of requests of each type that you choose to TrustDesk, as a client application would."),
@@ -149,7 +150,8 @@ async function renderCompany(box, name) {
   };
 
   const form = h("form", { onsubmit: async (e) => { e.preventDefault(); await save(); } },
-    h("div", { class: "grid2" }, field("TrustDesk URL", url, "https, or http only for this machine. Empty means generate only: nothing is sent."),
+    h("div", { class: "grid2" }, withFleet(field("TrustDesk URL", url, "https, or http only for this machine. Empty means generate only: nothing is sent. Or follow the fleet: the address is looked up when a run starts."),
+      fleetChoice(url, "TRUSTDESK_URL", "TrustDesk", catalog.fleet || [], running)),
       field("Token variable", tokenEnv, "The NAME of the environment variable that holds a TrustDesk token with the Client application scope. The token itself is never stored here.")),
     h("h3", {}, "Employees"),
     h("div", { class: "grid3" }, field("New hires (last ~75 days)", fNew, "They test probation rules."), field("Tenured (1 to 15 years)", fTen, "They build leave and sick history."),

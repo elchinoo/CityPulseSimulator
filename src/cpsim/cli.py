@@ -7,7 +7,7 @@ import signal
 import sys
 from urllib.parse import urlsplit
 
-from . import model
+from . import fleet, model
 
 
 def _serve() -> None:
@@ -60,10 +60,12 @@ def _load_company(path: str):
 
 async def _run_company(company, dry: bool) -> int:
     from .hr_engine import HrRun, TrustDeskClient
+    from .runtime import Runtime
     from .tokens import TRUSTDESK_CLIENT, outbound_token
 
     make = None
     if company.target_url and not dry:
+        company = Runtime.resolved(company)          # a fleet reference becomes the address of the environment (SpecError: exit 2)
         token = outbound_token(company.token_env, TRUSTDESK_CLIENT)
         if not token:
             sys.exit(f"{company.token_env} is empty: set it to a TrustDesk client token (or configure CPSIM_SERVICE_CLIENT_SECRET)")
@@ -88,7 +90,12 @@ EXIT_MISCONFIGURED, EXIT_REFUSED = 2, 3
 
 def expand_env(text: str) -> str:
     """`${NAME}` and `${NAME:-default}` in a target_url; an unset variable becomes the default, or empty. Only URLs are expanded:
-    credentials are never read from a file, only from the environment variable a workload names."""
+    credentials are never read from a file, only from the environment variable a workload names.
+
+    A target that is exactly a fleet reference (`${CITYPULSE_URL}`, see fleet.py) is NOT expanded here: it is kept as written and
+    resolved when the workload starts, by the same code as in server mode (an unset one then fails with a clear message)."""
+    if fleet.reference_name(text):
+        return text
     return ENV_REF.sub(lambda m: os.environ.get(m.group(1)) or m.group(2) or "", text)
 
 
@@ -136,7 +143,7 @@ def status_line(s: dict, elapsed: float) -> str:
 
 
 async def _run_workloads(path: str, only: str | None, seconds: float | None, dry_run: bool, every: float) -> int:
-    from . import presets
+    from . import presets, wl_model
     from .hr_model import parse_company
     from .runtime import Runtime
     from .store import MemoryStore
@@ -170,6 +177,11 @@ async def _run_workloads(path: str, only: str | None, seconds: float | None, dry
     used = {w.params["company"] for w in rt.workloads().values() if w.kind == "trustdesk"}
     targets += [(c.name, c.target_url) for c in rt.companies().values() if c.name in used]
     for name, url in targets:
+        try:
+            url = fleet.resolve(url, wl_model.allow_http_targets())     # what a start would use; unresolved: say so before anything starts
+        except model.SpecError as exc:
+            print(f"cpsim: {name}: {exc}; or use --dry-run to generate without sending", file=sys.stderr)
+            return EXIT_MISCONFIGURED
         if not url and not dry_run:
             print(f"cpsim: {name} has no target_url (is its URL variable set?); use --dry-run to generate without sending", file=sys.stderr)
             return EXIT_MISCONFIGURED
@@ -285,7 +297,8 @@ def main(argv: list[str] | None = None) -> None:
     cg.add_argument("--name", default=None, help="the name (or the stem name-1, name-2... for several); made up when omitted")
     cg.add_argument("--out", default=None, help="write one file per city into this directory (created if needed)")
     cg.add_argument("--format", choices=("yaml", "json"), default="yaml")
-    cg.add_argument("--target-url", default="", help="the CityPulse URL to put in each city (default empty: generate only)")
+    cg.add_argument("--target-url", default=None, help="the CityPulse URL, or ${CITYPULSE_URL} to follow the fleet, to put in each city "
+                    "(default: ${CITYPULSE_URL} when that variable is set, else empty: generate only)")
     cg.add_argument("--token-env", default="CITYPULSE_INGEST_TOKEN", help="the NAME of the variable holding the ingest token")
     cg.add_argument("--autostart", action="store_true", help="mark the cities to start when the app starts")
     cg.add_argument("-v", "--verbose", action="store_true", help="list each city's districts and sensor types")

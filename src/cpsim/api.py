@@ -14,7 +14,7 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import __version__, auth, citygen, core, credentials, metrics, reporter
+from . import __version__, auth, citygen, core, credentials, fleet, metrics, reporter
 from .catalog import DISTRICT_KINDS, DISTRICTS, GROUPS, TYPES
 from .core import COOKIE, CSRF_HEADER, fed, local
 from .districts import KINDS as DISTRICT_KIND_NAMES
@@ -37,7 +37,7 @@ from .protocols.image import MAX_CHANNELS
 from .runtime import Runtime
 from .schedule import MAX_BATCH, MAX_INTERVAL, MIN_INTERVAL, max_rate
 from .store import open_store
-from .wl_model import parse_workload
+from .wl_model import allow_http_targets, parse_workload
 
 STATIC = Path(__file__).resolve().parent / "static"
 MAX_BODY = 512 * 1024
@@ -336,6 +336,12 @@ def _credential_users() -> dict[str, list[str]]:
     return users
 
 
+@app.get("/api/fleet", dependencies=[Depends(require("sim:read"))])
+def fleet_status():
+    """The six fleet addresses this app was given (by ecoctl, or by hand). URLs are not secrets."""
+    return {"vars": fleet.status()}
+
+
 @app.get("/api/credentials", dependencies=[Depends(require("settings:manage"))])
 def list_credentials():
     """Names only, with where each value comes from. A value is never returned."""
@@ -375,7 +381,7 @@ def catalog():
             "groups": GROUPS, "districts": [{"id": k, "name": v, "kind": DISTRICT_KINDS[k]} for k, v in DISTRICTS.items()],   # the fixed presets' ids; any id of the district rule is valid
             "generator": {"sizes": citygen.SIZES, "profiles": list(citygen.PROFILES), "max_count": citygen.MAX_COUNT,
                           "district_kinds": list(DISTRICT_KIND_NAMES), "district_names": len(QUALIFIERS) * sum(len(v) for v in NOUNS.values())},
-            "protocols": list(PROTOCOL_CHOICES),
+            "protocols": list(PROTOCOL_CHOICES), "fleet": fleet.status(), "defaults": {"city_target_url": fleet.default_target(fleet.CITY_VAR)},
             "limits": {"group_count": MAX_GROUP_COUNT, "city_sensors": MAX_CITY_SENSORS, "channels_per_device": MAX_CHANNELS,
                        "devices": DEVICE_LIMITS}}
 
@@ -386,7 +392,7 @@ def _bad(exc: Exception) -> HTTPException:
 
 def _summary(name: str, city) -> dict:
     runner = runtime.runners.get(name)
-    return {"name": name, "target_url": city.target_url, "sensors": city.sensor_count(), "groups": len(city.groups),
+    return {"name": name, "target_url": city.target_url, "target": fleet.describe(city.target_url), "sensors": city.sensor_count(), "groups": len(city.groups),
             "running": runner is not None, "autostart": city.autostart,
             "protocols": sorted({g.protocol for g in city.groups}),
             "stats": runner.snapshot() if runner else None}
@@ -406,7 +412,7 @@ class GenerateBody(BaseModel):
     size: str | int = "medium"
     profile: str = "mixed"
     count: int = Field(1, ge=1, le=citygen.MAX_COUNT)
-    target_url: str = Field("", max_length=300)
+    target_url: str | None = Field(None, max_length=300)      # omitted: the app's fleet CityPulse (`${CITYPULSE_URL}`) when it is set, else empty
     token_env: str = Field("CITYPULSE_INGEST_TOKEN", max_length=64)
     autostart: bool = False
 
@@ -417,7 +423,7 @@ def generate_cities(body: GenerateBody):
     try:
         taken = set(store.cities())
         made = citygen.generate_cities(body.count, body.size, body.profile, body.seed, body.name, taken,
-                                       target_url=check_target(body.target_url), token_env=body.token_env, autostart=body.autostart)
+                                       target_url=None if body.target_url is None else check_target(body.target_url), token_env=body.token_env, autostart=body.autostart)
         for g in made:
             parse_city(g.city)
     except SpecError as exc:
@@ -435,7 +441,7 @@ def get_city(name: str):
     city = runtime.get(name)
     if city is None:
         raise HTTPException(404, "no such city")
-    return {**city.to_dict(), "running": name in runtime.runners}
+    return {**city.to_dict(), "target": fleet.describe(city.target_url), "running": name in runtime.runners}
 
 
 @app.put("/api/cities/{name}", dependencies=[Depends(require("sim:edit"))])
@@ -443,6 +449,7 @@ def put_city(name: str, spec: dict):
     """Create or replace a city. A running city must be stopped first."""
     if name in runtime.runners:
         raise HTTPException(409, "stop the city before changing it")
+    spec = {k: v for k, v in spec.items() if k != "target"}       # read-only echo of a GET (reference and resolved address)
     try:
         city = parse_city({**spec, "name": name})
     except SpecError as exc:
@@ -524,13 +531,13 @@ PRESETS = [
 @app.get("/api/hr/catalog", dependencies=[Depends(require("sim:read"))])
 def hr_catalog():
     return {"types": [{"key": t.key, "label": t.label, "kind": t.kind} for t in HR_TYPES.values()],
-            "departments": [d for d, _ in DEPARTMENTS], "presets": PRESETS,
+            "departments": [d for d, _ in DEPARTMENTS], "presets": PRESETS, "fleet": fleet.status(),
             "limits": {"per_type": MAX_PER_TYPE, "total": MAX_TOTAL, "employees": MAX_EMPLOYEES}}
 
 
 def _company_summary(name: str, c) -> dict:
     run = runtime.hr_runs.get(name)
-    return {"name": name, "target_url": c.target_url, "employees": c.new_employees + c.tenured_employees,
+    return {"name": name, "target_url": c.target_url, "target": fleet.describe(c.target_url), "employees": c.new_employees + c.tenured_employees,
             "requests": c.total_requests(), "types": len(c.requests), "problem_pct": c.problem_pct,
             "state": run.state if run else "idle", "dry_run": not c.target_url,
             "scheduled": bool(runtime.company_schedules.get(name) and runtime.company_schedules[name].running),
@@ -552,7 +559,7 @@ def get_company(name: str):
         raise HTTPException(404, "no such company")
     run = runtime.hr_runs.get(name)
     sched = runtime.company_schedules.get(name)
-    return {**c.to_dict(), "state": run.state if run else "idle", "schedule_run": sched.snapshot() if sched else None}
+    return {**c.to_dict(), "target": fleet.describe(c.target_url), "state": run.state if run else "idle", "schedule_run": sched.snapshot() if sched else None}
 
 
 @app.put("/api/companies/{name}", dependencies=[Depends(require("sim:edit"))])
@@ -561,6 +568,7 @@ def put_company(name: str, spec: dict):
     sched = runtime.company_schedules.get(name)
     if (run and run.running) or (sched and sched.running):
         raise HTTPException(409, "stop the company (and its schedule) before changing it")
+    spec = {k: v for k, v in spec.items() if k != "target"}
     try:
         c = parse_company({**spec, "name": name})
     except SpecError as exc:
@@ -669,14 +677,14 @@ def workload_catalog():
                        "min_interval": max(k.min_interval, MIN_INTERVAL), "max_batch": min(k.max_batch, MAX_BATCH),
                        "schedule": k.schedule, "params": k.defaults(), "fields": k.fields, "presets": k.presets,
                        "url_hint": k.url_hint, "env_hint": k.env_hint} for k in KINDS.values()],
-            "managed_elsewhere": MANAGED_ELSEWHERE,
+            "managed_elsewhere": MANAGED_ELSEWHERE, "fleet": fleet.status(), "kind_vars": fleet.KIND_VARS,
             "limits": {"interval": [MIN_INTERVAL, MAX_INTERVAL], "batch": MAX_BATCH, "max_rate": max_rate()}}
 
 
 def _workload_summary(name: str, wl) -> dict:
     runner = runtime.wl_runners.get(name)
     snap = runner.snapshot() if runner else None
-    return {"name": name, "kind": wl.kind, "target_url": wl.target_url, "interval": wl.schedule.interval, "batch": wl.schedule.batch,
+    return {"name": name, "kind": wl.kind, "target_url": wl.target_url, "target": fleet.describe(wl.target_url, allow_http_targets()), "interval": wl.schedule.interval, "batch": wl.schedule.batch,
             "start_on_boot": wl.schedule.start_on_boot, "state": snap["state"] if snap else "idle", "stats": snap}
 
 
@@ -694,7 +702,7 @@ def get_workload(name: str):
     if wl is None:
         raise HTTPException(404, "no such workload")
     runner = runtime.wl_runners.get(name)
-    return {**wl.to_dict(), "state": runner.state if runner else "idle"}
+    return {**wl.to_dict(), "target": fleet.describe(wl.target_url, allow_http_targets()), "state": runner.state if runner else "idle"}
 
 
 @app.put("/api/workloads/{name}", dependencies=[Depends(require("sim:edit"))])
@@ -703,6 +711,7 @@ def put_workload(name: str, spec: dict):
     runner = runtime.wl_runners.get(name)
     if runner and runner.running:
         raise HTTPException(409, "stop the workload before changing it")
+    spec = {k: v for k, v in spec.items() if k != "target"}
     try:
         wl = parse_workload({**spec, "name": name})
     except SpecError as exc:

@@ -1,5 +1,7 @@
 """Owns the running cities. Everything runs in the app's event loop."""
-from . import kinds
+from dataclasses import replace
+
+from . import fleet, kinds
 from .engine import CityRunner
 from .hr_engine import HrRun, TrustDeskClient
 from .hr_model import Company, parse_company
@@ -7,7 +9,7 @@ from .model import City, SpecError, parse_city
 from .schedule import company_schedule, max_rate
 from .sinks import HttpSink, NullSink
 from .tokens import CITYPULSE_INGEST, TRUSTDESK_CLIENT, outbound_token
-from .wl_model import Workload, parse_workload
+from .wl_model import Workload, allow_http_targets, parse_workload
 from .wl_runner import WorkloadRunner
 
 
@@ -31,6 +33,12 @@ class Runtime:
     def get(self, name: str) -> City | None:
         return self.specs().get(name)
 
+    @staticmethod
+    def resolved(spec, allow_http: bool = False):
+        """The spec with its fleet reference (`${CITYPULSE_URL}`) replaced by the address the environment holds NOW, checked with the
+        usual URL rules; raises SpecError when it does not resolve. Used at start time only: what is stored keeps the reference."""
+        return replace(spec, target_url=fleet.resolve(spec.target_url, allow_http))
+
     def _sink(self, city: City):
         if not city.target_url:
             return NullSink()
@@ -48,6 +56,7 @@ class Runtime:
             return self.runners[name]
         if city.sensor_count() == 0:
             raise SpecError("add at least one sensor group first")
+        city = self.resolved(city)
         runner = CityRunner(city, self._sink(city))
         await runner.start()
         self.runners[name] = runner
@@ -104,6 +113,7 @@ class Runtime:
 
     def _hr_client_factory(self, company: Company):
         """A function that builds the TrustDesk client of a company (None: generate only). Raises SpecError when the token is missing."""
+        company = self.resolved(company)
         if not company.target_url:
             return None
         token = outbound_token(company.token_env, TRUSTDESK_CLIENT)
@@ -129,6 +139,7 @@ class Runtime:
             raise RuntimeError("this company is already running")
         if company.total_requests() == 0 and (company.new_employees + company.tenured_employees) == 0:
             raise SpecError("add employees or requests first")
+        company = self.resolved(company)
         run = HrRun(company, self._hr_client_factory(company))
         self.hr_runs[name] = run
         run.start()
@@ -177,11 +188,13 @@ class Runtime:
             company = self.company(wl.params["company"])
             if company is None:
                 raise SpecError(f"there is no company named {wl.params['company']!r}: create it under Companies first")
+            company = self.resolved(company)
             self._hr_client_factory(company)         # fail now, not at the first tick, when its token is missing
             start_run = self._launch_hr
         return lambda: kinds.build_sender(wl, token=token, company=company, start_run=start_run)
 
     def _runner(self, wl: Workload, name: str | None = None) -> WorkloadRunner:
+        wl = self.resolved(wl, allow_http_targets())
         return WorkloadRunner(wl, self._sender_factory(wl), name=name)
 
     def start_workload(self, name: str) -> WorkloadRunner:
@@ -225,6 +238,7 @@ class Runtime:
         current = self.company_schedules.get(name)
         if current and current.running:
             raise RuntimeError("this company's schedule is already running")
+        company = self.resolved(company)
         wl = Workload(name, "trustdesk", company.target_url, "", "", {"company": name}, company_schedule(company.schedule))
         runner = self._runner(wl, name=f"company/{name}")
         runner.start()

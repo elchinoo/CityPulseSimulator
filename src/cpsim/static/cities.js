@@ -1,5 +1,6 @@
 import { api } from "/kit/api.js";
 import { guard } from "/static/perm.js";
+import { fleetChoice, targetText, withFleet } from "/static/fleet.js";
 import { $, field, fill, h, toast } from "/kit/ui.js";
 
 let catalog = null;
@@ -79,7 +80,7 @@ async function renderList(box) {
   const err = h("p", { class: "error", role: "alert" });
   const create = async (spec) => {
     err.textContent = "";
-    try { await api(`/api/cities/${spec.name}`, { method: "PUT", json: spec }); location.hash = `#cities/${spec.name}`; } catch (e) { err.textContent = e.message; }
+    try { await api(`/api/cities/${spec.name}`, { method: "PUT", json: { target_url: catalog.defaults?.city_target_url ?? "", ...spec } }); location.hash = `#cities/${spec.name}`; } catch (e) { err.textContent = e.message; }
   };
   const form = h("form", { class: "grid-inline", onsubmit: (e) => { e.preventDefault(); create({ name: name.value, groups: [] }); } },
     field("City name", name, "Lowercase letters, digits and dashes."),
@@ -90,7 +91,7 @@ async function renderList(box) {
   const gen = generatorCard(catalog);
   const rows = cities.map((c) => h("tr", { class: "clickable", onclick: () => { location.hash = `#cities/${c.name}`; } },
     h("td", { class: "title" }, c.name), h("td", {}, c.sensors.toLocaleString()), h("td", {}, c.protocols.map(label).join(", ") || "none yet"),
-    h("td", { class: "muted" }, c.target_url || "generate only"),
+    h("td", { class: "muted" }, targetText(c)),
     h("td", {}, h("span", { class: `st ${c.running ? "ok" : "offline"}` }, c.running ? "running" : "stopped"))));
   fill(box, h("h1", {}, "Cities"),
     h("p", { class: "muted" }, "A city is a set of sensor groups. Each group picks a sensor type, a count, a value range, a reporting frequency, a protocol and a burst percentage."),
@@ -132,7 +133,7 @@ async function renderCity(box, name) {
     err.textContent = "";
     try { await api(`/api/cities/${name}`, { method: "PUT", json: spec }); if (msg) toast(msg); renderCity(box, name); } catch (e) { err.textContent = e.message; }
   };
-  const { running, ...spec } = city;
+  const { running, target, ...spec } = city;
 
   const url = h("input", { id: "c-url", value: city.target_url, placeholder: "https://your-citypulse… (empty: generate only)", disabled: locked });
   const tokenEnv = h("input", { id: "c-token", value: city.token_env, disabled: locked, maxlength: "64" });
@@ -141,7 +142,7 @@ async function renderCity(box, name) {
   const expose = h("input", { id: "c-expose", type: "checkbox", checked: city.expose, disabled: locked });
   const auto = h("input", { id: "c-auto", type: "checkbox", checked: city.autostart, disabled: locked });
   const settings = h("form", { onsubmit: (e) => { e.preventDefault(); save({ ...spec, target_url: url.value.trim(), token_env: tokenEnv.value.trim(), seed: seed.value === "" ? null : Number(seed.value), poll_interval: Number(poll.value), expose: expose.checked, autostart: auto.checked }, "Saved"); } },
-    h("div", { class: "grid2" }, field("CityPulse URL", url, "https, or http only for this machine."),
+    h("div", { class: "grid2" }, withFleet(field("CityPulse URL", url, "https, or http only for this machine. Or follow the fleet: the address is looked up when the city starts."), fleetChoice(url, "CITYPULSE_URL", "CityPulse", catalog.fleet || [], locked)),
       field("Token variable", tokenEnv, "The NAME of the environment variable that holds the CityPulse ingest token. The token itself is never stored here.")),
     h("div", { class: "grid3" }, field("Random seed", seed, "Same seed, same data and bursts."), field("Gateway poll interval (s)", poll)),
     h("label", { class: "check", for: "c-expose" }, expose, " Let other machines reach the protocol endpoints (binds all interfaces)"),

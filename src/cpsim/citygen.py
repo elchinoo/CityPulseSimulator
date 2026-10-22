@@ -13,6 +13,7 @@ import random
 import re
 from dataclasses import dataclass
 
+from . import fleet
 from .catalog import TYPES
 from .districts import KINDS, district_id, pretty
 from .model import (
@@ -218,8 +219,8 @@ def _range(rng: random.Random, kind: str) -> tuple[float | None, float | None]:
 
 
 def generate_city(seed: int, size="medium", profile: str = "mixed", name: str | None = None, taken: frozenset | set = frozenset(),
-                  target_url: str = "", token_env: str = "CITYPULSE_INGEST_TOKEN", autostart: bool = False) -> Generated:
-    """One demo city. The same (seed, size, profile) always gives the same districts and groups; `name` and `taken` only decide the
+                  target_url: str | None = None, token_env: str = "CITYPULSE_INGEST_TOKEN", autostart: bool = False) -> Generated:
+    """One demo city (`target_url` None: the fleet CityPulse reference when CITYPULSE_URL is set on this app, else empty). The same (seed, size, profile) always gives the same districts and groups; `name` and `taken` only decide the
     name (a given name is used as it is; otherwise one is made up and kept out of `taken`)."""
     if profile not in PROFILES:
         raise SpecError(f"profile must be one of {', '.join(PROFILES)}")
@@ -301,6 +302,8 @@ def generate_city(seed: int, size="medium", profile: str = "mixed", name: str | 
     order = {d: i for i, d in enumerate(ids)}
     groups.sort(key=lambda g: (order[g["district"]], -g["count"], g["type"]))
 
+    if target_url is None:
+        target_url = fleet.default_target()
     city = {"name": city_name, "target_url": target_url, "token_env": token_env, "seed": seed,
             "poll_interval": rng.choices(*zip(*POLL_CHOICES))[0], "expose": False, "autostart": bool(autostart), "groups": groups}
     parse_city(city)                                          # never hand out something the rest of the app would refuse

@@ -109,7 +109,7 @@ def test_a_non_local_target_is_announced_in_one_line_and_the_key_stays_out_of_th
 def test_fatal_misconfiguration_exits_non_zero_with_a_clear_message(tmp_path, pb):
     f = write(tmp_path, PB_FILE)
     r = cpsim("workloads", "run", f, "--seconds", "1", environ=env(PAYBROKER_SECRET_KEY=KEY))             # no PAYBROKER_URL
-    assert r.returncode == 2 and "no target_url" in r.stderr and "--dry-run" in r.stderr
+    assert r.returncode == 2 and "PAYBROKER_URL is not set on this app" in r.stderr and "--dry-run" in r.stderr
     r = cpsim("workloads", "run", f, "--seconds", "1", environ=env(PAYBROKER_URL=pb.url))                    # no key
     assert r.returncode == 2 and "PAYBROKER_SECRET_KEY" in r.stderr
     r = cpsim("workloads", "run", write(tmp_path, "workloads: []", "e.yaml"))
