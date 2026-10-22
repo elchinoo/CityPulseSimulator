@@ -32,6 +32,45 @@ const DEMO = (name) => ({
   ],
 });
 
+// ---- the generator: varied demo cities (same seed, same city; another seed, another city) ----------------------
+function generatorCard(cat) {
+  const gen = cat.generator || { sizes: { small: 200, medium: 2000, large: 20000 }, profiles: ["mixed"], max_count: 50 };
+  const count = h("input", { id: "gen-count", type: "number", min: "1", max: gen.max_count, value: "1" });
+  const size = h("select", { id: "gen-size" }, ...Object.entries(gen.sizes).map(([k, n]) => h("option", { value: k, selected: k === "medium" }, `${k} (~${Math.min(n, cat.limits.city_sensors).toLocaleString()} sensors)`)));
+  const profile = h("select", { id: "gen-profile" }, ...gen.profiles.map((p) => h("option", { value: p, selected: p === "mixed" }, p)));
+  const seed = h("input", { id: "gen-seed", type: "number", min: "0", max: "4294967295", placeholder: "random" });
+  const gname = h("input", { id: "gen-name", maxlength: "40", placeholder: "made up for each city", pattern: "[a-z0-9][a-z0-9-]*" });
+  const err = h("p", { class: "error", role: "alert" });
+  const out = h("div", {});
+  const button = h("button", { class: "primary", type: "submit" }, "Generate demo cities");
+  const form = h("form", { id: "gen-form", onsubmit: async (e) => {
+    e.preventDefault();
+    err.textContent = "";
+    fill(out);
+    const body = { count: Number(count.value) || 1, size: size.value, profile: profile.value };
+    if (seed.value !== "") body.seed = Number(seed.value);
+    if (gname.value.trim() !== "") body.name = gname.value.trim();
+    button.disabled = true;
+    try {
+      const r = await api("/api/cities/generate", { method: "POST", json: body });
+      toast(`Created ${r.created} ${r.created === 1 ? "city" : "cities"}`);
+      fill(out, summaryTable(r));
+    } catch (x) { err.textContent = x.message; } finally { button.disabled = false; }
+  } },
+  h("div", { class: "grid3" }, field("How many", count, `1 to ${gen.max_count}; every city is different.`), field("Size", size, "Sensors per city; large is clamped to the limit."), field("Profile", profile, "What kind of city: mixed picks its own themes.")),
+  h("div", { class: "grid3" }, field("Seed (optional)", seed, "Same seed, same cities. City n of a batch uses seed + n."), field("Name (optional)", gname, "With several cities it becomes name-1, name-2…")),
+  h("div", { class: "btns" }, button));
+  return h("div", { class: "card" }, h("p", { class: "muted" }, "Each city gets its own mix of 3 to 12 districts, sensor types that suit each district, group sizes, protocols, frequencies and burst percentages."), form, err, out);
+}
+
+function summaryTable(r) {
+  const rows = r.cities.map((c) => h("tr", { class: "clickable", onclick: () => { location.hash = `#cities/${c.name}`; } },
+    h("td", { class: "title" }, c.name), h("td", { class: "num" }, c.sensors.toLocaleString()), h("td", { class: "num" }, c.districts.length),
+    h("td", {}, c.districts.map((d) => d.name).join(", ")), h("td", { class: "num" }, c.types), h("td", {}, c.protocols.map(label).join(", ")), h("td", { class: "num" }, c.seed)));
+  return h("div", {}, h("h3", {}, `Created ${r.created} ${r.created === 1 ? "city" : "cities"}, ${r.sensors.toLocaleString()} sensors in all`),
+    h("div", { class: "card flush" }, h("table", { id: "gen-summary" }, h("thead", {}, h("tr", {}, ...["City", "Sensors", "Districts", "Which", "Types", "Protocols", "Seed"].map((t) => h("th", {}, t)))), h("tbody", {}, ...rows))));
+}
+
 // ---- the list ------------------------------------------------------------------------------------
 async function renderList(box) {
   let cities;
@@ -45,9 +84,10 @@ async function renderList(box) {
   const form = h("form", { class: "grid-inline", onsubmit: (e) => { e.preventDefault(); create({ name: name.value, groups: [] }); } },
     field("City name", name, "Lowercase letters, digits and dashes."),
     h("button", { class: "primary", type: "submit" }, "Create empty city"),
-    h("button", { class: "secondary", type: "button", onclick: () => name.value ? create(DEMO(name.value)) : (err.textContent = "Type a name first.") }, "Create a demo city"),
-    ...[2, 5].map((n) => h("button", { class: "secondary", type: "button", title: `A reading from each of 60 sensors every ${n} seconds, no protocol sockets`,
-      onclick: () => name.value ? create(LIVE(name.value, n)) : (err.textContent = "Type a name first.") }, `Live feed every ${n} s`)));
+    h("button", { class: "secondary", type: "button", title: "Fixed preset: every one is identical", onclick: () => name.value ? create(DEMO(name.value)) : (err.textContent = "Type a name first.") }, "Fixed demo city (always the same)"),
+    ...[2, 5].map((n) => h("button", { class: "secondary", type: "button", title: `Fixed preset: a reading from each of 60 sensors every ${n} seconds, no protocol sockets`,
+      onclick: () => name.value ? create(LIVE(name.value, n)) : (err.textContent = "Type a name first.") }, `Fixed live feed every ${n} s`)));
+  const gen = generatorCard(catalog);
   const rows = cities.map((c) => h("tr", { class: "clickable", onclick: () => { location.hash = `#cities/${c.name}`; } },
     h("td", { class: "title" }, c.name), h("td", {}, c.sensors.toLocaleString()), h("td", {}, c.protocols.map(label).join(", ") || "none yet"),
     h("td", { class: "muted" }, c.target_url || "generate only"),
@@ -55,8 +95,10 @@ async function renderList(box) {
   fill(box, h("h1", {}, "Cities"),
     h("p", { class: "muted" }, "A city is a set of sensor groups. Each group picks a sensor type, a count, a value range, a reporting frequency, a protocol and a burst percentage."),
     cities.length ? h("div", { class: "card flush" }, h("table", {}, h("thead", {}, h("tr", {}, ...["City", "Sensors", "Protocols", "Sends to", "State"].map((t) => h("th", {}, t)))), h("tbody", {}, ...rows)))
-      : h("div", { class: "card" }, h("p", { class: "empty" }, "No cities yet. Create a demo city to see all five protocols at work.")),
-    h("h2", { class: "section-title" }, "New city"), h("div", { class: "card" }, form, err));
+      : h("div", { class: "card" }, h("p", { class: "empty" }, "No cities yet. Generate a few demo cities below: each one is different.")),
+    h("h2", { class: "section-title" }, "Generate demo cities"), gen,
+    h("h2", { class: "section-title" }, "Fixed presets"),
+    h("div", { class: "card" }, h("p", { class: "muted" }, "These always give the very same city (the same districts and sensors). To get cities that differ, use the generator above."), form, err));
   guard(box);
 }
 

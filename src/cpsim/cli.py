@@ -223,6 +223,34 @@ async def _run_workloads(path: str, only: str | None, seconds: float | None, dry
     return code
 
 
+def _generate_cities(args) -> int:
+    """`cpsim cities generate`: varied demo cities as YAML/JSON files in the existing city format (no Postgres, no network)."""
+    from pathlib import Path
+
+    from . import citygen
+
+    out = Path(args.out) if args.out else None
+    taken = set()
+    if out is not None and out.is_dir():
+        taken = {f.stem for f in out.iterdir() if f.suffix in (".yaml", ".yml", ".json")}
+    size = int(args.size) if str(args.size).isdigit() else args.size
+    cities = citygen.generate_cities(args.count, size, args.profile, args.seed, args.name, taken,
+                                     target_url=args.target_url, token_env=args.token_env, autostart=args.autostart)
+    if out is not None:
+        out.mkdir(parents=True, exist_ok=True)
+        for g in cities:
+            (out / f"{g.name}.{args.format}").write_text(citygen.render(g, args.format))
+    print(f"{'city':<26}{'seed':>11}{'sensors':>9}{'districts':>10}{'groups':>8}  protocols")
+    for g in cities:
+        r = g.report()
+        print(f"{r['name']:<26}{r['seed']:>11}{r['sensors']:>9}{len(r['districts']):>10}{r['groups']:>8}  {', '.join(r['protocols'])}")
+        if args.verbose:
+            for d in r["districts"]:
+                print(f"    {d['id']} {d['name']} ({d['kind']}): {d['sensors']} sensors, {', '.join(d['types'])}")
+    print(f"{len(cities)} cities" + (f" written to {out}" if out else " (use --out DIR to write the files)"))
+    return 0
+
+
 def main(argv: list[str] | None = None) -> None:
     p = argparse.ArgumentParser(prog="cpsim", description="CityPulse Simulator: cities of simulated sensors speaking industrial protocols.")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -247,6 +275,20 @@ def main(argv: list[str] | None = None) -> None:
     wr.add_argument("--seconds", type=float, default=None, help="stop after this many seconds")
     wr.add_argument("--dry-run", action="store_true", help="generate everything, send nothing (also what an empty target_url means)")
     wr.add_argument("--status-every", type=float, default=5.0, help="seconds between status lines (default 5)")
+    cs = sub.add_parser("cities", help="demo cities, headless (no Postgres needed)")
+    csub = cs.add_subparsers(dest="ccmd", required=True)
+    cg = csub.add_parser("generate", help="generate varied demo cities: same seed, same city; another seed, another city")
+    cg.add_argument("--count", type=int, default=1, help="how many cities, 1 to 50 (default 1)")
+    cg.add_argument("--size", default="medium", help="small (~200 sensors), medium (~2000), large (~20000, clamped to 10000) or a number")
+    cg.add_argument("--profile", default="mixed", help="balanced, industrial, coastal, tourist, residential or mixed (default)")
+    cg.add_argument("--seed", type=int, default=None, help="city i uses seed+i; random when omitted")
+    cg.add_argument("--name", default=None, help="the name (or the stem name-1, name-2... for several); made up when omitted")
+    cg.add_argument("--out", default=None, help="write one file per city into this directory (created if needed)")
+    cg.add_argument("--format", choices=("yaml", "json"), default="yaml")
+    cg.add_argument("--target-url", default="", help="the CityPulse URL to put in each city (default empty: generate only)")
+    cg.add_argument("--token-env", default="CITYPULSE_INGEST_TOKEN", help="the NAME of the variable holding the ingest token")
+    cg.add_argument("--autostart", action="store_true", help="mark the cities to start when the app starts")
+    cg.add_argument("-v", "--verbose", action="store_true", help="list each city's districts and sensor types")
     sub.add_parser("migrate", help="apply the SQL migrations (serve does this at start)")
     imp = sub.add_parser("import-files", help="one-shot upgrade: load cities and companies saved by the first release's file store")
     imp.add_argument("directory", help="the old CPSIM_DATA_DIR (holds state.json)")
@@ -291,6 +333,8 @@ def main(argv: list[str] | None = None) -> None:
                 print(f"ok: company {co.name!r}, {co.total_requests()} requests per run")
         elif args.cmd == "workloads":
             sys.exit(asyncio.run(_run_workloads(args.file, args.only, args.seconds, args.dry_run, max(args.status_every, 0.5))))
+        elif args.cmd == "cities":
+            sys.exit(_generate_cities(args))
         elif args.cmd == "migrate":
             from . import migrate
 

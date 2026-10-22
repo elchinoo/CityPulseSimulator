@@ -14,8 +14,8 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import __version__, auth, core, credentials, metrics, reporter
-from .catalog import DISTRICTS, GROUPS, TYPES
+from . import __version__, auth, citygen, core, credentials, metrics, reporter
+from .catalog import DISTRICT_KINDS, DISTRICTS, GROUPS, TYPES
 from .core import COOKIE, CSRF_HEADER, fed, local
 from .hr_catalog import DEPARTMENTS
 from .hr_catalog import TYPES as HR_TYPES
@@ -28,6 +28,7 @@ from .model import (
     MAX_GROUP_COUNT,
     PROTOCOL_CHOICES,
     SpecError,
+    check_target,
     parse_city,
 )
 from .protocols.image import MAX_CHANNELS
@@ -369,7 +370,8 @@ def delete_credential(name: str):
 def catalog():
     return {"types": [{"key": t.key, "label": t.label, "unit": t.unit, "group": t.group, "lo": t.lo, "hi": t.hi,
                        "interval": t.interval} for t in TYPES.values()],
-            "groups": GROUPS, "districts": [{"id": k, "name": v} for k, v in DISTRICTS.items()],
+            "groups": GROUPS, "districts": [{"id": k, "name": v, "kind": DISTRICT_KINDS[k]} for k, v in DISTRICTS.items()],
+            "generator": {"sizes": citygen.SIZES, "profiles": list(citygen.PROFILES), "max_count": citygen.MAX_COUNT},
             "protocols": list(PROTOCOL_CHOICES),
             "limits": {"group_count": MAX_GROUP_COUNT, "city_sensors": MAX_CITY_SENSORS, "channels_per_device": MAX_CHANNELS,
                        "devices": DEVICE_LIMITS}}
@@ -393,6 +395,36 @@ def list_cities():
         return [_summary(n, c) for n, c in runtime.specs().items()]
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(503, "the state store is unavailable") from exc
+
+
+class GenerateBody(BaseModel):
+    name: str | None = Field(None, max_length=40)
+    seed: int | None = Field(None, ge=0, lt=2**32)
+    size: str | int = "medium"
+    profile: str = "mixed"
+    count: int = Field(1, ge=1, le=citygen.MAX_COUNT)
+    target_url: str = Field("", max_length=300)
+    token_env: str = Field("CITYPULSE_INGEST_TOKEN", max_length=64)
+    autostart: bool = False
+
+
+@app.post("/api/cities/generate", dependencies=[Depends(require("sim:edit"))])
+def generate_cities(body: GenerateBody):
+    """Create 1 to 50 varied demo cities (never replacing an existing one) and report what each contains."""
+    try:
+        taken = set(store.cities())
+        made = citygen.generate_cities(body.count, body.size, body.profile, body.seed, body.name, taken,
+                                       target_url=check_target(body.target_url), token_env=body.token_env, autostart=body.autostart)
+        for g in made:
+            parse_city(g.city)
+    except SpecError as exc:
+        if "already exists" in str(exc):
+            raise HTTPException(409, str(exc)) from exc
+        raise _bad(exc) from exc
+    for g in made:
+        store.save_city(g.name, g.city)
+    cities = [g.report() for g in made]
+    return {"created": len(cities), "sensors": sum(c["sensors"] for c in cities), "cities": cities}
 
 
 @app.get("/api/cities/{name}", dependencies=[Depends(require("sim:read"))])

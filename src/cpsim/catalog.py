@@ -85,3 +85,10 @@ def hash_str(s: str) -> int:
     for ch in s:
         h = (h * 31 + ord(ch)) % 1_000_003
     return h
+
+
+# What each catalogue district is, so a generated city can put the right sensors in it (see citygen.py).
+DISTRICT_KINDS: dict[str, str] = {
+    "d01": "harbour", "d02": "historic", "d03": "centre", "d04": "campus", "d05": "riverside", "d06": "airport",
+    "d07": "residential", "d08": "industrial", "d09": "green", "d10": "suburb", "d11": "market", "d12": "rural",
+}

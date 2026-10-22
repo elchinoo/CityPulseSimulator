@@ -18,6 +18,47 @@ data reach CityPulse the way it would from a real plant: through **industrial pr
 * **Random bursts** driven by a percentage per group (below), plus a *burst the whole city* button.
 * **Monitored by PagerLens**: `/healthz`, `/metrics` (scope-limited token) and an optional self-report.
 
+## Demo cities that differ: the generator
+
+A fixed preset gives the very same city every time. To get cities that differ, **generate** them: each city draws its own number of
+districts (3 to 12 of the twelve in the catalogue), the sensor types that suit each district, group sizes, protocols, frequencies,
+burst percentages and sometimes a narrower value range. **Same seed, size and profile give the same city; another seed gives another.**
+
+* **Districts have a kind** (harbour, historic, centre, campus, riverside, airport, residential, industrial, green, suburb, market,
+  rural) with an affinity for each of the 27 types: a harbour favours water level, wind and bridge vibration; an industrial park air
+  quality, noise, power meters and gas leaks; a residential district noise, parking and waste bins; a centre traffic, parking and air
+  quality. Other types stay possible but rare.
+* **Size:** `small` is about 200 sensors, `medium` about 2,000, `large` about 20,000 clamped to the limit of 10,000 (or give a number
+  from 8 to 10,000). Each city varies around that, and group sizes are heavy-headed: a few big groups, many small ones. Every
+  protocol appears; each city leans on its own protocols, and a protocol is never given more sensors than its address space holds.
+* **Profile:** `balanced`, `industrial`, `coastal`, `tourist`, `residential` (each favours its kinds of district and sensors) or
+  `mixed` (the default: random themes per city).
+* **Names** are made up (`port-alder`, `silverbrook`, `linden-falls`), unique, and never collide with an existing city. Generated
+  cities have no URL unless you give one, name the usual `CITYPULSE_INGEST_TOKEN` variable, and can be marked *start on boot*.
+
+**Web app:** Cities, *Generate demo cities* (how many, size, profile, optional seed and name) shows a table of what was created; the
+old presets are kept below it, labelled *fixed*.
+
+**API** (permission `sim:edit`; never replaces an existing city; 1 to 50 cities per call):
+
+```bash
+curl -X POST $URL/api/cities/generate -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"count": 10, "size": "medium", "profile": "coastal", "seed": 42}'
+# optional: name (name-1, name-2... for several), target_url, token_env, autostart
+# -> {"created": 10, "sensors": 19873, "cities": [{"name", "seed", "sensors", "groups", "types", "protocols",
+#      "districts": [{"id", "name", "kind", "sensors", "groups", "types": [...]}]}, ...]}
+```
+
+City *n* of a batch uses seed + *n*, so the batch is reproducible. **Headless** (no Postgres, no network):
+
+```bash
+cpsim cities generate --count 10 --size medium --profile industrial --seed 42 --out cities/   # one YAML file per city
+cpsim cities generate --count 3 --format json --out cities/ -v      # JSON; -v lists each city's districts and types
+cpsim run cities/<name>.yaml --seconds 30                            # the files are ordinary city files
+```
+
+Without `--out` it only prints the summary. Options: `--name`, `--target-url`, `--token-env`, `--autostart`.
+
 ## Companies: simulated employees for TrustDesk
 
 The same app also simulates an **employer** for [TrustDesk](https://github.com/elchinoo/TrustDesk). A *company* says how many
@@ -363,6 +404,7 @@ Workloads are covered by schedule maths on a fake clock (drift, jitter bounds, s
 the schema upgrade, and the headless CLI as a real process with no Postgres. Also covers every protocol stack (including malformed input, dead links, wrong addresses and a pymodbus interoperability
 check), the generator (burst probability rises with the percentage; seeds reproduce; every episode behaves as described),
 validation of cities, a whole city across all five protocols into a sink, back-pressure and retry, and the web API.
+The demo-city generator is tested for determinism, variability (districts, types, sizes, protocols), limits, unique names, the API per role, the CLI as a real process without Postgres, and the browser form with a fake DOM (needs `node`).
 
 ## Honest limits
 
