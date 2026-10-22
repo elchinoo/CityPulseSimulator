@@ -47,7 +47,8 @@ async def test_every_protocol_delivers_readings_that_reach_the_sink():
         by.setdefault(r["protocol"], set()).add(r["sensor"])
     assert set(by) == {*PROTOCOLS, "direct"}                                     # all five stacks plus direct
     assert len(by["modbus_tcp"]) == 40 and all(len(by[p]) == 5 for p in ("ethernet_ip", "ethercat", "profinet", "profibus", "direct"))
-    assert all(set(r) == {"sensor", "type", "district", "protocol", "value", "ts"} for r in sink.got)
+    assert all(set(r) == {"sensor", "type", "district", "protocol", "city", "value", "ts"} for r in sink.got)
+    assert {r["city"] for r in sink.got} == {runner.city.name}
     assert all(isinstance(r["value"], float) and -50 <= r["value"] <= 5000 for r in sink.got)
     ids = [r["sensor"] for r in sink.got]
     assert all(len(i) <= 64 for i in ids)
@@ -146,3 +147,13 @@ def test_a_target_without_its_token_is_an_error_naming_the_variable(monkeypatch)
     rt.store.save_city("testville", spec(target_url="https://citypulse.example").to_dict())
     with pytest.raises(SpecError, match="CITYPULSE_INGEST_TOKEN"):
         rt._sink(rt.get("testville"))
+
+
+def test_readings_carry_the_city_and_a_long_name_gets_a_short_stable_id():
+    import re
+
+    from cpsim.model import city_id
+    cid = re.compile(r"^[a-z0-9][a-z0-9_-]{0,31}$")      # CityPulse's rule for a city id
+    assert city_id("paris") == "paris"
+    long_a, long_b = "a" * 40, "a" * 39 + "b"
+    assert cid.match(city_id(long_a)) and cid.match(city_id(long_b)) and city_id(long_a) != city_id(long_b) and city_id(long_a) == city_id(long_a)

@@ -14,7 +14,7 @@ from collections import Counter, deque
 
 from . import __version__
 from .generator import SensorSim
-from .model import City
+from .model import City, city_id
 from .protocols import PROTOCOLS, enip, ethercat, modbus, profibus, profinet
 from .protocols.image import CHANNEL_BYTES, MAX_CHANNELS, Device, unpack
 from .sinks import Fatal, NullSink, Retry
@@ -33,6 +33,7 @@ class Channel:
 class CityRunner:
     def __init__(self, city: City, sink=None, rng_now=time.time):
         self.city, self.sink, self.now = city, sink or NullSink(), rng_now
+        self.city_id = city_id(city.name)
         t0 = self.now()
         self.sensors: list[SensorSim] = []
         for g in city.groups:
@@ -40,7 +41,7 @@ class CityRunner:
             for _ in range(g.count):
                 sid = f"{g.type.replace('_', '-')}-{g.district}-{city.name}-{len(self.sensors):05d}"
                 if len(sid) > 64:   # long names: shorten the descriptive parts, never the unique index
-                    sid = f"{g.type.replace('_', '-')[:12]}-{g.district[:6]}-{city.name[:20]}-{len(self.sensors):05d}"
+                    sid = f"{g.type.replace('_', '-')[:12]}-{g.district[:6]}-{city_id(city.name)[:20]}-{len(self.sensors):05d}"
                 self.sensors.append(SensorSim(sid, g.type, g.district, g.protocol, lo, hi, g.frequency, g.burst_pct, city.seed, t0))
         self.devices: dict[str, dict[int, Device]] = {p: {} for p in PROTOCOLS}
         self.channels: dict[str, dict[int, list[Channel]]] = {p: {} for p in PROTOCOLS}
@@ -149,7 +150,7 @@ class CityRunner:
             self.stats["bad_values"] += 1
         self.stats["readings"] += 1
         self.buffer.append({"sensor": s.id, "type": s.type, "district": s.district, "protocol": s.protocol,
-                            "value": None if bad else round(value, 4), "ts": round(self.now(), 3)})
+                            "city": self.city_id, "value": None if bad else round(value, 4), "ts": round(self.now(), 3)})
         if len(self.buffer) > BUFFER_MAX:
             self.buffer.popleft()
             self.stats["dropped"] += 1

@@ -1,4 +1,5 @@
 """Cities and the sensor groups they contain, with strict validation (a city is user input)."""
+import hashlib
 import ipaddress
 import math
 import re
@@ -11,6 +12,16 @@ from .protocols.image import MAX_CHANNELS
 
 PROTOCOL_CHOICES = ("direct", *PROTOCOLS)
 NAME = re.compile(r"^[a-z0-9][a-z0-9-]{0,39}$")
+CITY_ID_MAX = 32      # CityPulse's limit for a city id
+
+
+def city_id(name: str) -> str:
+    """The id a city is reported under: its name, or a shortened name plus a hash when it is too long for CityPulse."""
+    if len(name) <= CITY_ID_MAX:
+        return name
+    return f"{name[:CITY_ID_MAX - 9]}-{hashlib.sha1(name.encode()).hexdigest()[:8]}"
+
+
 ENV_NAME = re.compile(r"^[A-Z][A-Z0-9_]{0,63}$")
 MAX_GROUPS, MAX_GROUP_COUNT, MAX_CITY_SENSORS = 100, 5000, 10_000
 # How many devices an address space allows on one server (one protocol endpoint per city).
