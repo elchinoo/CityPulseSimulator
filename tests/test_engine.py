@@ -115,23 +115,34 @@ async def test_a_boost_produces_bursts_and_corrupt_values_become_rejectable_null
     assert any(r["value"] is None for r in sink.got) or runner.stats["bad_values"] == 0
 
 
-def test_no_target_means_generate_only(tmp_path):
+class MemStore:
+    """Just enough of the store for the runtime's sink selection."""
+
+    def __init__(self):
+        self.specs = {}
+
+    def save_city(self, name, spec):
+        self.specs[name] = spec
+
+    def cities(self):
+        return self.specs
+
+
+def test_no_target_means_generate_only():
     from cpsim.runtime import Runtime
     from cpsim.sinks import NullSink
-    from cpsim.store import FileStore
-    rt = Runtime(FileStore(str(tmp_path)))
+    rt = Runtime(MemStore())
     rt.store.save_city("testville", spec().to_dict())
     assert isinstance(rt._sink(rt.get("testville")), NullSink)
 
 
-def test_a_target_without_its_token_is_an_error_naming_the_variable(tmp_path, monkeypatch):
+def test_a_target_without_its_token_is_an_error_naming_the_variable(monkeypatch):
     import pytest
 
     from cpsim.model import SpecError
     from cpsim.runtime import Runtime
-    from cpsim.store import FileStore
     monkeypatch.delenv("CITYPULSE_INGEST_TOKEN", raising=False)
-    rt = Runtime(FileStore(str(tmp_path)))
+    rt = Runtime(MemStore())
     rt.store.save_city("testville", spec(target_url="https://citypulse.example").to_dict())
     with pytest.raises(SpecError, match="CITYPULSE_INGEST_TOKEN"):
         rt._sink(rt.get("testville"))

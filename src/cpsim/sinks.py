@@ -1,6 +1,8 @@
 """Where readings go: CityPulse over HTTP (with an ingest token), or nowhere."""
 import httpx
 
+from .tokens import BearerAuth
+
 
 class Retry(Exception):
     def __init__(self, after: float = 0.0):
@@ -24,9 +26,8 @@ class HttpSink:
     """POST /api/readings with an ingest-scope token. Never follows redirects (a redirect would strip the token's
     protection or send it somewhere unintended); the token is only ever sent to the configured URL."""
 
-    def __init__(self, url: str, token: str):
-        self.client = httpx.AsyncClient(base_url=url, timeout=20, follow_redirects=False,
-                                        headers={"Authorization": f"Bearer {token}"})
+    def __init__(self, url: str, token):
+        self.client = httpx.AsyncClient(base_url=url, timeout=20, follow_redirects=False, auth=BearerAuth(token))
 
     async def send(self, readings: list[dict]) -> None:
         try:

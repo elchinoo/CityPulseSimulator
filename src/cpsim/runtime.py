@@ -1,11 +1,10 @@
 """Owns the running cities. Everything runs in the app's event loop."""
-import os
-
 from .engine import CityRunner
 from .hr_engine import HrRun, TrustDeskClient
 from .hr_model import Company, parse_company
 from .model import City, SpecError, parse_city
 from .sinks import HttpSink, NullSink
+from .tokens import CITYPULSE_INGEST, TRUSTDESK_CLIENT, outbound_token
 
 
 class Runtime:
@@ -29,9 +28,10 @@ class Runtime:
     def _sink(self, city: City):
         if not city.target_url:
             return NullSink()
-        token = os.environ.get(city.token_env, "") or _file_token(city.token_env)
+        token = outbound_token(city.token_env, CITYPULSE_INGEST)
         if not token:
-            raise SpecError(f"the environment variable {city.token_env} is empty: set it to an ingest token for {city.target_url}")
+            raise SpecError(f"the environment variable {city.token_env} is empty: set it to an ingest token for {city.target_url} "
+                            "(or configure the service client of the identity provider: see CPSIM_SERVICE_CLIENT_SECRET)")
         return HttpSink(city.target_url, token)
 
     async def start(self, name: str) -> CityRunner:
@@ -91,10 +91,11 @@ class Runtime:
             raise SpecError("add employees or requests first")
         make = None
         if company.target_url:
-            token = os.environ.get(company.token_env, "") or _file_token(company.token_env)
+            token = outbound_token(company.token_env, TRUSTDESK_CLIENT)
             if not token:
                 raise SpecError(f"the environment variable {company.token_env} is empty: set it to a TrustDesk "
-                                f"client token for {company.target_url}")
+                                f"client token for {company.target_url} "
+                                "(or configure the service client of the identity provider: see CPSIM_SERVICE_CLIENT_SECRET)")
 
             def make():  # noqa: E306
                 return TrustDeskClient(company.target_url, token)
@@ -115,16 +116,4 @@ class Runtime:
 
     def snapshots(self) -> list[dict]:
         return [r.snapshot() for r in self.runners.values()]
-
-
-def _file_token(env: str) -> str:
-    path = os.environ.get(f"{env}_FILE", "")
-    if not path:
-        return ""
-    try:
-        with open(path) as fh:
-            return fh.readline().strip()
-    except OSError:
-        return ""
-
 

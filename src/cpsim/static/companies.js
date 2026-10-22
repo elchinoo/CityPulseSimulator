@@ -1,5 +1,6 @@
-import { api } from "/static/api.js";
-import { $, field, fill, h, toast } from "/static/ui.js";
+import { api } from "/kit/api.js";
+import { guard } from "/static/perm.js";
+import { $, field, fill, h, toast } from "/kit/ui.js";
 
 let catalog = null;
 let timer = null;
@@ -32,6 +33,7 @@ async function renderList(box) {
     h("div", { class: "card" }, field("Company name", name, "Lowercase letters, digits and dashes."),
       h("div", { class: "btns wrap" }, h("button", { class: "secondary", type: "button", onclick: () => create(null) }, "Create empty"),
         ...catalog.presets.map((p) => h("button", { class: "primary", type: "button", onclick: () => create(p) }, p.label))), err));
+  guard(box);
 }
 
 // ---- one company -----------------------------------------------------------------------------------
@@ -149,12 +151,13 @@ async function renderCompany(box, name) {
     h("div", { class: "card burst-big" },
       running ? h("button", { class: "secondary", type: "button", onclick: act("stop", "Stopping") }, "Stop")
         : h("button", { class: "primary", type: "button", onclick: act("run", "Started") }, "Save and run"),
-      h("button", { class: "secondary", type: "button", disabled: running, onclick: doPreview }, "Preview"),
+      h("button", { class: "secondary", type: "button", disabled: running, "data-ro-ok": "1", onclick: doPreview }, "Preview"),
       h("button", { class: "secondary", type: "button", onclick: refresh }, "Refresh TrustDesk statuses"),
       h("span", { class: "muted" }, running ? "Running: settings are locked until it stops." : "Preview shows what would be sent without sending anything.")),
     err, live, preview,
     h("h2", { class: "section-title" }, "What to send"), h("div", { class: "card" }, form),
     h("div", { class: "btns" }, h("button", { class: "danger", type: "button", onclick: async () => { if (!confirm(`Delete ${name}?`)) return; await api(`/api/companies/${name}`, { method: "DELETE" }); location.hash = "#companies"; } }, "Delete company")));
+  guard(box);
   await draw();
   clearInterval(timer);
   timer = setInterval(() => { if (!location.hash.startsWith(`#companies/${name}`)) clearInterval(timer); else draw(); }, running ? 1500 : 5000);

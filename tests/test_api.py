@@ -10,11 +10,7 @@ CITY = {"groups": [{"type": "temperature", "count": 8, "protocol": "modbus_tcp",
 
 
 @pytest.fixture
-def client(monkeypatch):
-    api.store.delete("admin_password_hash")
-    for name in list(api.store.cities()):
-        api.store.delete_city(name)
-    auth._setup_code, auth._sessions.clear(), api._failures.clear()
+def client(monkeypatch, db):
     with TestClient(api.app) as c:
         yield c
 
@@ -101,7 +97,7 @@ def test_metrics_need_their_own_token_and_use_the_shared_names(client, monkeypat
         assert name in ok.text, name
     login(client)
     assert client.get("/metrics").status_code == 401                                          # a browser session is not a scraper
-    assert client.get("/api/cities", headers={"Authorization": "Bearer " + "m" * 40}).status_code == 401   # nor the reverse
+    assert client.get("/api/cities", headers={"Authorization": "Bearer " + "m" * 40}).status_code == 403   # nor the reverse
 
 
 def test_catalog_and_health(client):

@@ -1,5 +1,6 @@
-import { api } from "/static/api.js";
-import { $, field, fill, h, toast } from "/static/ui.js";
+import { api } from "/kit/api.js";
+import { guard } from "/static/perm.js";
+import { $, field, fill, h, toast } from "/kit/ui.js";
 
 let catalog = null;
 let timer = null;
@@ -46,6 +47,7 @@ async function renderList(box) {
     cities.length ? h("div", { class: "card flush" }, h("table", {}, h("thead", {}, h("tr", {}, ...["City", "Sensors", "Protocols", "Sends to", "State"].map((t) => h("th", {}, t)))), h("tbody", {}, ...rows)))
       : h("div", { class: "card" }, h("p", { class: "empty" }, "No cities yet. Create a demo city to see all five protocols at work.")),
     h("h2", { class: "section-title" }, "New city"), h("div", { class: "card" }, form, err));
+  guard(box);
 }
 
 // ---- one city ------------------------------------------------------------------------------------
@@ -147,6 +149,7 @@ async function renderCity(box, name) {
     h("h2", { class: "section-title" }, "Add a sensor group"), h("div", { class: "card" }, addGroup),
     h("h2", { class: "section-title" }, "City settings"), h("div", { class: "card" }, settings),
     h("div", { class: "btns" }, h("button", { class: "danger", type: "button", onclick: async () => { if (!confirm(`Delete ${name}?`)) return; await api(`/api/cities/${name}`, { method: "DELETE" }); location.hash = "#cities"; } }, "Delete city")));
+  guard(box);
   await draw();
   clearInterval(timer);
   if (locked) timer = setInterval(() => { if (!location.hash.startsWith(`#cities/${name}`)) clearInterval(timer); else draw(); }, 2000);

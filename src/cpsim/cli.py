@@ -4,13 +4,15 @@ import json
 import os
 import sys
 
-from . import auth, model
-from .store import open_store
+from . import model
 
 
 def _serve() -> None:
     import uvicorn
 
+    from . import migrate
+
+    migrate.run()
     uvicorn.run("cpsim.api:app", host=os.environ.get("HOST", "127.0.0.1"), port=int(os.environ.get("PORT", "8000")),
                 proxy_headers=True, forwarded_allow_ips="*", log_level=os.environ.get("LOG_LEVEL", "info"))
 
@@ -25,9 +27,9 @@ def _load(path: str) -> model.City:
 
 async def _run(city: model.City, seconds: float | None) -> None:
     from .runtime import Runtime
-    from .store import FileStore
+    from .store import open_store
 
-    rt = Runtime(FileStore(os.environ.get("CPSIM_DATA_DIR", "data")))
+    rt = Runtime(open_store())
     rt.store.save_city(city.name, city.to_dict())
     runner = await rt.start(city.name)
     print(f"city {city.name!r} running: {len(runner.sensors)} sensors, endpoints {json.dumps(runner.endpoints)}", flush=True)
@@ -54,13 +56,13 @@ def _load_company(path: str):
 
 async def _run_company(company, dry: bool) -> int:
     from .hr_engine import HrRun, TrustDeskClient
-    from .runtime import _file_token
+    from .tokens import TRUSTDESK_CLIENT, outbound_token
 
     make = None
     if company.target_url and not dry:
-        token = os.environ.get(company.token_env, "") or _file_token(company.token_env)
+        token = outbound_token(company.token_env, TRUSTDESK_CLIENT)
         if not token:
-            sys.exit(f"{company.token_env} is empty: set it to a TrustDesk client token")
+            sys.exit(f"{company.token_env} is empty: set it to a TrustDesk client token (or configure CPSIM_SERVICE_CLIENT_SECRET)")
 
         def make():  # noqa: E306
             return TrustDeskClient(company.target_url, token)
@@ -89,6 +91,9 @@ def main(argv: list[str] | None = None) -> None:
     hr = sub.add_parser("hr-run", help="send a company's employees and requests to TrustDesk, then exit")
     hr.add_argument("file")
     hr.add_argument("--dry-run", action="store_true", help="generate everything, send nothing")
+    sub.add_parser("migrate", help="apply the SQL migrations (serve does this at start)")
+    imp = sub.add_parser("import-files", help="one-shot upgrade: load cities and companies saved by the first release's file store")
+    imp.add_argument("directory", help="the old CPSIM_DATA_DIR (holds state.json)")
     sub.add_parser("reset-admin", help="forget the admin password so setup can run again")
     args = p.parse_args(argv)
     try:
@@ -105,8 +110,23 @@ def main(argv: list[str] | None = None) -> None:
                   f"in {len(c.requests)} types, {c.problem_pct:g}% problem requests")
         elif args.cmd == "hr-run":
             sys.exit(asyncio.run(_run_company(_load_company(args.file), args.dry_run)))
+        elif args.cmd == "migrate":
+            from . import migrate
+
+            applied = migrate.run()
+            print("applied: " + (", ".join(applied) if applied else "nothing to do"))
+        elif args.cmd == "import-files":
+            from .store import import_files
+
+            done = import_files(args.directory)
+            print(f"imported {done['cities']} cities and {done['companies']} companies; {done['skipped']} skipped (invalid); "
+                  f"admin password {'imported' if done['admin_password'] else 'left as it is'}")
         elif args.cmd == "reset-admin":
-            auth.reset_admin(open_store())
+            from . import auth
+            from .core import db
+
+            with db.connect() as conn:
+                auth.reset_admin(conn)
             print("Admin password cleared. Restart the app; it prints a new setup code.")
     except model.SpecError as exc:
         sys.exit(f"invalid city: {exc}")

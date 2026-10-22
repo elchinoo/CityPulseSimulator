@@ -323,12 +323,7 @@ PASSWORD = "correct-horse-battery"  # pragma: allowlist secret
 
 
 @pytest.fixture
-def client():
-    api.store.delete("admin_password_hash")
-    for name in list(api.store.companies()):
-        api.store.delete_company(name)
-    auth._setup_code, auth._sessions.clear(), api._failures.clear()
-    api.runtime.hr_runs.clear()
+def client(db):
     with TestClient(api.app) as c:
         assert c.post("/api/setup", json={"code": auth.setup_code(), "password": PASSWORD}, headers=H).status_code == 200
         yield c

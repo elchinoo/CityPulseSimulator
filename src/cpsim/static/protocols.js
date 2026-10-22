@@ -1,4 +1,4 @@
-import { $, fill, h } from "/static/ui.js";
+import { $, fill, h } from "/kit/ui.js";
 
 const ROWS = [
   ["Modbus TCP", "TCP", "Real framing (MBAP, function 0x03/0x04). A third-party client (pymodbus) is part of the test suite.", "One port, many unit ids; reads input registers."],

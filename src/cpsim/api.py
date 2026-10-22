@@ -1,19 +1,22 @@
 import asyncio
 import contextlib
 import sys
-import time
 from datetime import date
 from pathlib import Path
 
+import psycopg
+from apgkit.auth.rp import safe_return_to
+from apgkit.config import env_bool
+from apgkit.guard import SecurityGuard
+from apgkit.web import is_https, mount_kit_static, public_url
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
-from starlette.middleware.base import BaseHTTPMiddleware
 
-from . import __version__, auth, metrics, reporter
+from . import __version__, auth, core, metrics, reporter
 from .catalog import DISTRICTS, GROUPS, TYPES
-from .config import get_settings
+from .core import COOKIE, CSRF_HEADER, fed, local
 from .hr_catalog import DEPARTMENTS
 from .hr_catalog import TYPES as HR_TYPES
 from .hr_gen import build_plan
@@ -32,8 +35,6 @@ from .store import open_store
 
 STATIC = Path(__file__).resolve().parent / "static"
 MAX_BODY = 512 * 1024
-COOKIE = "cs_session"
-CSRF_HEADER = "x-cpsim-csrf"
 store = open_store()
 runtime = Runtime(store)
 metrics.bind(runtime, store)
@@ -54,8 +55,9 @@ def _announce_setup_code() -> None:
 async def lifespan(_: FastAPI):
     tasks = []
     try:
-        if auth.needs_setup(store):
-            _announce_setup_code()
+        with core.db.connect(retries=1) as conn:
+            if auth.needs_setup(conn) and not fed.enabled:
+                _announce_setup_code()
         await runtime.autostart()
     except Exception as exc:  # noqa: BLE001 - e.g. the database is asleep; the UI still comes up
         print(f"cpsim: startup: {str(exc).splitlines()[0][:160]}", file=sys.stderr, flush=True)
@@ -70,91 +72,34 @@ async def lifespan(_: FastAPI):
         await runtime.stop_all()
 
 
-_FAIL_WINDOW, _FAIL_LIMIT = 60.0, 10
-_failures: dict[str, list[float]] = {}
+# --- authentication ---------------------------------------------------------------------------------------
+# Fail closed: with no credential configured every protected route is denied (and the setup flow is offered), unless the
+# operator explicitly sets CPSIM_ALLOW_ANONYMOUS=true. The mechanics (local admin, API tokens, federated JWTs, sessions, rate
+# limiting) are agentpg-kit's `Authenticator`; here we only name the permission each route needs.
+
+def authenticate(request: Request):
+    return core.auth.authenticate(request)
 
 
-def _client(request: Request) -> str:
-    return request.client.host if request.client else "?"
+def require(permission: str, **kw):
+    return core.auth.require(permission, **kw)
 
 
-def _rate_limited(client: str) -> bool:
-    now = time.monotonic()
-    recent = [t for t in _failures.get(client, []) if now - t < _FAIL_WINDOW]
-    _failures[client] = recent
-    return len(recent) >= _FAIL_LIMIT
-
-
-def _record_failure(client: str) -> None:
-    _failures.setdefault(client, []).append(time.monotonic())
-    if len(_failures) > 10_000:
-        _failures.clear()
-
-
-def _bearer(request: Request) -> str | None:
-    header = request.headers.get("authorization", "")
-    return header[7:].strip() if header[:7].lower() == "bearer " else None
-
-
-def _is_https(request: Request) -> bool:
-    return request.url.scheme == "https" or request.headers.get("x-forwarded-proto", "").lower() == "https"
-
-
-def authenticate(request: Request, scope: str) -> bool:
-    """True if the caller may use `scope` ('full' or 'metrics'). Raises 401/429 for bad credentials."""
-    if get_settings().allow_anonymous:
-        return True
-    client = _client(request)
-    if _rate_limited(client):
+def _guard_attempts(request: Request) -> str:
+    client = core.auth.client(request)
+    if core.auth.limiter.limited(client):
         raise HTTPException(429, "too many failed attempts; wait a minute")
-    raw = _bearer(request)
-    if raw is not None:
-        if auth.static_key_matches(raw) or (scope == "metrics" and auth.metrics_token_matches(raw)):
-            return True
-        _record_failure(client)
-        raise HTTPException(401, "invalid credentials")
-    return auth.session_valid(request.cookies.get(COOKIE)) and scope == "full"
+    return client
 
 
-def require(scope: str = "full"):
-    def dep(request: Request) -> None:
-        if not authenticate(request, scope):
-            raise HTTPException(401 if not _bearer(request) else 403, "authentication required")
-    return dep
-
-
-class Guard(BaseHTTPMiddleware):
-    async def dispatch(self, request, call_next):
-        started, code = time.perf_counter(), 500
-        try:
-            resp = await self._dispatch(request, call_next)
-            code = resp.status_code
-            return resp
-        finally:
-            label = getattr(request.scope.get("route"), "path", None) or "other"
-            if label != "/metrics":
-                metrics.observe(request.method, label, code, started)
-
-    async def _dispatch(self, request, call_next):
-        path = request.url.path
-        if path.startswith("/api/") and int(request.headers.get("content-length", "0") or 0) > MAX_BODY:
-            return JSONResponse({"detail": "request body too large"}, status_code=413)
-        if (path.startswith("/api/") and request.method not in {"GET", "HEAD", "OPTIONS"}
-                and _bearer(request) is None and not request.headers.get(CSRF_HEADER)):
-            return JSONResponse({"detail": "missing CSRF header"}, status_code=403)
-        resp = await call_next(request)
-        resp.headers["X-Content-Type-Options"] = "nosniff"
-        resp.headers["X-Frame-Options"] = "DENY"
-        resp.headers["Referrer-Policy"] = "no-referrer"
-        resp.headers["Cache-Control"] = resp.headers.get("Cache-Control", "no-store")
-        resp.headers["Content-Security-Policy"] = ("default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; "
-                                                   "connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
-        return resp
+def _db_unavailable() -> HTTPException:
+    return core.auth.db_unavailable()
 
 
 app = FastAPI(title="CityPulse Simulator", version=__version__, lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
-app.add_middleware(Guard)
+app.add_middleware(SecurityGuard, csrf_header=CSRF_HEADER, max_body=MAX_BODY, observe=core.metrics.observe)
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
+mount_kit_static(app)
 
 
 @app.get("/healthz")
@@ -167,7 +112,7 @@ def readyz():
     return {"status": "ready"} if store.healthy() else JSONResponse({"status": "waking-database"}, status_code=503)
 
 
-@app.get("/metrics", dependencies=[Depends(require("metrics"))])
+@app.get("/metrics", dependencies=[Depends(require("metrics:scrape", allow_cookie=False))])
 def prometheus_metrics():
     body, ctype = metrics.render()
     return Response(body, media_type=ctype)
@@ -195,89 +140,181 @@ class PasswordBody(BaseModel):
     new: str = Field(max_length=256)
 
 
-def _start_session(request: Request, response: Response) -> None:
-    response.set_cookie(COOKIE, auth.create_session(), httponly=True, samesite="strict", secure=_is_https(request),
+class TokenBody(BaseModel):
+    name: str = Field(min_length=1, max_length=60)
+    scope: str = Field(pattern="^(read|metrics|full)$")
+
+
+def _start_session(conn, request: Request, response: Response, **who) -> None:
+    raw = local.create_session(conn, **who)
+    response.set_cookie(COOKIE, raw, httponly=True, samesite="strict" if not who else "lax", secure=is_https(request),
                         max_age=auth.SESSION_SECONDS, path="/")
-
-
-def _guard_attempts(request: Request) -> str:
-    client = _client(request)
-    if _rate_limited(client):
-        raise HTTPException(429, "too many failed attempts; wait a minute")
-    return client
 
 
 @app.get("/api/session")
 def session_state(request: Request):
+    """Public: tells the UI which screen to show. Reveals no secrets."""
+    principal = None
     try:
-        ok = authenticate(request, "full")
-        setup = auth.needs_setup(store) and not get_settings().allow_anonymous
-        has_password = auth.admin_configured(store)
+        principal = authenticate(request)
+        with core.db.connect(retries=1) as conn:
+            setup = local.needs_setup(conn) and not env_bool("CPSIM_ALLOW_ANONYMOUS") and not fed.enabled
+            has_password = local.admin_configured(conn)
     except HTTPException:
         raise
-    except Exception as exc:  # noqa: BLE001 - store unavailable (database asleep)
-        raise HTTPException(503, "the state store is unavailable; it may be waking up, retry in a few seconds") from exc
+    except (psycopg.Error, RuntimeError) as exc:
+        raise _db_unavailable() from exc
     if setup:
         _announce_setup_code()
-    state = "setup_required" if setup else "logged_in" if ok else "logged_out"
-    return {"state": state, "has_admin_password": has_password, "password_login": has_password,
-            "key_login": bool(get_settings().api_key), "version": __version__, "store": store.kind}
+    state = "setup_required" if setup else "logged_in" if principal else "logged_out"
+    local_ok = fed.local_login or not fed.enabled
+    out = {"state": state, "has_admin_password": has_password, "password_login": has_password and local_ok,
+           "key_login": local.static_key_configured() and local_ok, "version": __version__,
+           "sso": {"issuer": fed.issuer, "login_url": "/auth/login"} if fed.enabled else None}
+    if principal:
+        out["user"] = {"name": principal.name, "email": principal.email, "source": principal.source, "roles": sorted(principal.roles),
+                       "permissions": ["*"] if "*" in principal.permissions else sorted(principal.permissions)}
+    return out
+
+
+# ---- federated sign-in (only when CPSIM_OIDC_ISSUER is set) ---------------------------------------------------
+@app.get("/auth/login")
+def sso_login(request: Request, next: str | None = None):
+    if not fed.enabled:
+        raise HTTPException(404, "single sign-on is not configured")
+    try:
+        with core.db.connect(retries=1) as conn:
+            url = fed.rp.begin(conn, public_url(request, core.public_url_env) + "/auth/callback", next)
+    except psycopg.Error as exc:
+        raise _db_unavailable() from exc
+    except Exception:  # noqa: BLE001 - the identity provider may be unreachable
+        return RedirectResponse("/?sso_error=the identity provider is unavailable", status_code=303)
+    return RedirectResponse(url, status_code=303)
+
+
+@app.get("/auth/callback")
+def sso_callback(request: Request, code: str = "", state: str = "", error: str = ""):
+    if not fed.enabled:
+        raise HTTPException(404, "single sign-on is not configured")
+    if error or not code or not state:
+        return RedirectResponse("/?sso_error=the sign-in was cancelled or failed", status_code=303)
+    from apgkit.auth import TokenError
+    try:
+        with core.db.connect(retries=1) as conn:
+            claims, back, id_token = fed.rp.finish(conn, public_url(request, core.public_url_env) + "/auth/callback", code, state)
+            roles = [r for r in claims.get("roles", []) if isinstance(r, str)]
+            resp = RedirectResponse(safe_return_to(back), status_code=303)
+            if not core.APP_AUTH.permissions_for(roles=roles):
+                return RedirectResponse("/?sso_error=your account has no role in CityPulse Simulator; ask an administrator", status_code=303)
+            _start_session(conn, request, resp, subject=str(claims["sub"]), name=str(claims.get("name") or ""), email=str(claims.get("email") or ""),
+                           roles=roles, source="oidc", id_token_hint=id_token)
+            return resp
+    except TokenError as exc:
+        return RedirectResponse("/?sso_error=" + str(exc)[:120], status_code=303)
 
 
 @app.post("/api/setup")
 def setup(body: SetupBody, request: Request, response: Response):
     client = _guard_attempts(request)
     try:
-        auth.complete_setup(store, body.code, body.password)
-    except PermissionError as exc:
-        _record_failure(client)
-        raise HTTPException(403, str(exc)) from exc
-    except ValueError as exc:
-        raise HTTPException(422, str(exc)) from exc
-    _start_session(request, response)
+        with core.db.connect(retries=1) as conn:
+            try:
+                local.complete_setup(conn, body.code, body.password)
+            except PermissionError as exc:
+                core.auth.limiter.record(client)
+                raise HTTPException(403, str(exc)) from exc
+            except ValueError as exc:
+                raise HTTPException(422, str(exc)) from exc
+            _start_session(conn, request, response)
+    except (psycopg.Error, RuntimeError) as exc:
+        raise _db_unavailable() from exc
     return {"ok": True}
 
 
 @app.post("/api/login")
 def login(body: LoginBody, request: Request, response: Response):
     client = _guard_attempts(request)
-    ok = (body.password is not None and auth.login(store, body.password)) or \
-         (body.api_key is not None and auth.static_key_matches(body.api_key))
-    if not ok:
-        _record_failure(client)
-        raise HTTPException(401, "invalid credentials")
-    _start_session(request, response)
+    try:
+        with core.db.connect(retries=1) as conn:
+            ok = False
+            if body.password is not None:
+                ok = local.login_password(conn, body.password)
+            elif body.api_key is not None:
+                ok = local.static_key_matches(body.api_key)
+            if not ok:
+                core.auth.limiter.record(client)
+                raise HTTPException(401, "invalid credentials")
+            _start_session(conn, request, response)
+    except (psycopg.Error, RuntimeError) as exc:
+        raise _db_unavailable() from exc
     return {"ok": True}
 
 
 @app.post("/api/logout")
 def logout(request: Request, response: Response):
-    auth.delete_session(request.cookies.get(COOKIE))
+    out: dict = {"ok": True}
+    try:
+        with core.db.connect(retries=1) as conn:
+            row = local.delete_session(conn, request.cookies.get(COOKIE))
+        if row and row["source"] == "oidc" and fed.enabled:
+            with contextlib.suppress(Exception):
+                out["logout_url"] = fed.rp.logout_url(row["id_token_hint"], public_url(request, core.public_url_env) + "/")
+    except (psycopg.Error, RuntimeError):
+        pass  # the cookie is cleared regardless; the session row expires on its own
     response.delete_cookie(COOKIE, path="/")
-    return {"ok": True}
+    return out
 
 
-@app.post("/api/admin-password", dependencies=[Depends(require())])
+@app.post("/api/admin-password", dependencies=[Depends(require("settings:manage"))])
 def admin_password(body: PasswordBody, request: Request):
+    """Set the admin password (first time, when signed in with a static key) or change it."""
     client = _guard_attempts(request)
     try:
-        if auth.admin_configured(store):
-            if body.current is None:
-                raise HTTPException(422, "current password is required")
-            auth.change_password(store, body.current, body.new)
-        else:
-            auth.set_password(store, body.new)
-    except PermissionError as exc:
-        _record_failure(client)
-        raise HTTPException(403, str(exc)) from exc
-    except ValueError as exc:
-        raise HTTPException(422, str(exc)) from exc
+        with core.db.connect() as conn:
+            try:
+                if local.admin_configured(conn):
+                    if body.current is None:
+                        raise HTTPException(422, "current password is required")
+                    local.change_password(conn, body.current, body.new)
+                else:
+                    local.set_admin_password(conn, body.new)
+            except PermissionError as exc:
+                core.auth.limiter.record(client)
+                raise HTTPException(403, str(exc)) from exc
+            except ValueError as exc:
+                raise HTTPException(422, str(exc)) from exc
+            conn.execute("DELETE FROM web_session")  # sign every browser out after a password change
+            conn.commit()
+    except (psycopg.Error, RuntimeError) as exc:
+        raise _db_unavailable() from exc
     return {"ok": True, "signed_out_everywhere": True}
+
+
+@app.get("/api/tokens", dependencies=[Depends(require("settings:manage"))])
+def list_tokens():
+    with core.db.connect() as conn:
+        return local.list_tokens(conn)
+
+
+@app.post("/api/tokens", dependencies=[Depends(require("settings:manage"))])
+def create_token(body: TokenBody):
+    """The token value is returned exactly once; only its hash is stored."""
+    with core.db.connect() as conn:
+        token_id, raw = local.create_token(conn, body.name.strip(), body.scope)
+    return {"id": token_id, "token": raw, "scope": body.scope, "name": body.name.strip()}
+
+
+@app.delete("/api/tokens/{token_id}", dependencies=[Depends(require("settings:manage"))])
+def revoke_token(token_id: int):
+    with core.db.connect() as conn:
+        if not local.revoke_token(conn, token_id):
+            raise HTTPException(404, "token not found or already revoked")
+    return {"revoked": token_id}
 
 
 # --- cities --------------------------------------------------------------------------------------
 
-@app.get("/api/catalog", dependencies=[Depends(require())])
+@app.get("/api/catalog", dependencies=[Depends(require("sim:read"))])
 def catalog():
     return {"types": [{"key": t.key, "label": t.label, "unit": t.unit, "group": t.group, "lo": t.lo, "hi": t.hi,
                        "interval": t.interval} for t in TYPES.values()],
@@ -299,7 +336,7 @@ def _summary(name: str, city) -> dict:
             "stats": runner.snapshot() if runner else None}
 
 
-@app.get("/api/cities", dependencies=[Depends(require())])
+@app.get("/api/cities", dependencies=[Depends(require("sim:read"))])
 def list_cities():
     try:
         return [_summary(n, c) for n, c in runtime.specs().items()]
@@ -307,7 +344,7 @@ def list_cities():
         raise HTTPException(503, "the state store is unavailable") from exc
 
 
-@app.get("/api/cities/{name}", dependencies=[Depends(require())])
+@app.get("/api/cities/{name}", dependencies=[Depends(require("sim:read"))])
 def get_city(name: str):
     city = runtime.get(name)
     if city is None:
@@ -315,7 +352,7 @@ def get_city(name: str):
     return {**city.to_dict(), "running": name in runtime.runners}
 
 
-@app.put("/api/cities/{name}", dependencies=[Depends(require())])
+@app.put("/api/cities/{name}", dependencies=[Depends(require("sim:edit"))])
 def put_city(name: str, spec: dict):
     """Create or replace a city. A running city must be stopped first."""
     if name in runtime.runners:
@@ -328,14 +365,14 @@ def put_city(name: str, spec: dict):
     return {"ok": True, "sensors": city.sensor_count()}
 
 
-@app.delete("/api/cities/{name}", dependencies=[Depends(require())])
+@app.delete("/api/cities/{name}", dependencies=[Depends(require("sim:edit"))])
 async def delete_city(name: str):
     await runtime.stop(name)
     store.delete_city(name)
     return {"ok": True}
 
 
-@app.post("/api/cities/{name}/start", dependencies=[Depends(require())])
+@app.post("/api/cities/{name}/start", dependencies=[Depends(require("sim:run"))])
 async def start_city(name: str):
     try:
         runner = await runtime.start(name)
@@ -348,7 +385,7 @@ async def start_city(name: str):
     return runner.snapshot()
 
 
-@app.post("/api/cities/{name}/stop", dependencies=[Depends(require())])
+@app.post("/api/cities/{name}/stop", dependencies=[Depends(require("sim:run"))])
 async def stop_city(name: str):
     return {"stopped": await runtime.stop(name)}
 
@@ -357,7 +394,7 @@ class BoostBody(BaseModel):
     seconds: int = Field(default=120, ge=5, le=1800)
 
 
-@app.post("/api/cities/{name}/burst", dependencies=[Depends(require())])
+@app.post("/api/cities/{name}/burst", dependencies=[Depends(require("sim:run"))])
 def burst_city(name: str, body: BoostBody):
     """Temporarily make every sensor's burst episodes far more likely (a storm over the city)."""
     runner = runtime.runners.get(name)
@@ -367,7 +404,7 @@ def burst_city(name: str, body: BoostBody):
     return runner.snapshot()
 
 
-@app.get("/api/cities/{name}/stats", dependencies=[Depends(require())])
+@app.get("/api/cities/{name}/stats", dependencies=[Depends(require("sim:read"))])
 def city_stats(name: str):
     runner = runtime.runners.get(name)
     if runner is None:
@@ -398,7 +435,7 @@ PRESETS = [
 ]
 
 
-@app.get("/api/hr/catalog", dependencies=[Depends(require())])
+@app.get("/api/hr/catalog", dependencies=[Depends(require("sim:read"))])
 def hr_catalog():
     return {"types": [{"key": t.key, "label": t.label, "kind": t.kind} for t in HR_TYPES.values()],
             "departments": [d for d, _ in DEPARTMENTS], "presets": PRESETS,
@@ -412,7 +449,7 @@ def _company_summary(name: str, c) -> dict:
             "state": run.state if run else "idle", "dry_run": not c.target_url}
 
 
-@app.get("/api/companies", dependencies=[Depends(require())])
+@app.get("/api/companies", dependencies=[Depends(require("sim:read"))])
 def list_companies():
     try:
         return [_company_summary(n, c) for n, c in runtime.companies().items()]
@@ -420,7 +457,7 @@ def list_companies():
         raise HTTPException(503, "the state store is unavailable") from exc
 
 
-@app.get("/api/companies/{name}", dependencies=[Depends(require())])
+@app.get("/api/companies/{name}", dependencies=[Depends(require("sim:read"))])
 def get_company(name: str):
     c = runtime.company(name)
     if c is None:
@@ -429,7 +466,7 @@ def get_company(name: str):
     return {**c.to_dict(), "state": run.state if run else "idle"}
 
 
-@app.put("/api/companies/{name}", dependencies=[Depends(require())])
+@app.put("/api/companies/{name}", dependencies=[Depends(require("sim:edit"))])
 def put_company(name: str, spec: dict):
     run = runtime.hr_runs.get(name)
     if run and run.running:
@@ -442,7 +479,7 @@ def put_company(name: str, spec: dict):
     return {"ok": True, "employees": c.new_employees + c.tenured_employees, "requests": c.total_requests()}
 
 
-@app.delete("/api/companies/{name}", dependencies=[Depends(require())])
+@app.delete("/api/companies/{name}", dependencies=[Depends(require("sim:edit"))])
 async def delete_company(name: str):
     await runtime.stop_hr(name)
     runtime.hr_runs.pop(name, None)
@@ -450,7 +487,7 @@ async def delete_company(name: str):
     return {"ok": True}
 
 
-@app.post("/api/companies/{name}/preview", dependencies=[Depends(require())])
+@app.post("/api/companies/{name}/preview", dependencies=[Depends(require("sim:read"))])
 def preview_company(name: str):
     """What a run would send, decided from the seed, without sending anything."""
     c = runtime.company(name)
@@ -474,7 +511,7 @@ def preview_company(name: str):
             "use_existing_note": "Employees already in TrustDesk are added to the pool at run time." if c.use_existing else ""}
 
 
-@app.post("/api/companies/{name}/run", dependencies=[Depends(require())])
+@app.post("/api/companies/{name}/run", dependencies=[Depends(require("sim:run"))])
 async def run_company(name: str):
     try:
         run = runtime.start_hr(name)
@@ -487,12 +524,12 @@ async def run_company(name: str):
     return run.snapshot()
 
 
-@app.post("/api/companies/{name}/stop", dependencies=[Depends(require())])
+@app.post("/api/companies/{name}/stop", dependencies=[Depends(require("sim:run"))])
 async def stop_company(name: str):
     return {"stopped": await runtime.stop_hr(name)}
 
 
-@app.get("/api/companies/{name}/status", dependencies=[Depends(require())])
+@app.get("/api/companies/{name}/status", dependencies=[Depends(require("sim:read"))])
 def company_status(name: str):
     run = runtime.hr_runs.get(name)
     if run is None:
@@ -500,7 +537,7 @@ def company_status(name: str):
     return run.snapshot()
 
 
-@app.post("/api/companies/{name}/refresh", dependencies=[Depends(require())])
+@app.post("/api/companies/{name}/refresh", dependencies=[Depends(require("sim:run"))])
 async def refresh_company(name: str):
     """Ask TrustDesk where the requests of the latest run stand (approved, rejected, waiting...)."""
     run = runtime.hr_runs.get(name)

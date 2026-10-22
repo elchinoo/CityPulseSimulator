@@ -1,28 +1,13 @@
 """Prometheus metrics, using the shared names every app in the family exposes (http_requests_total,
 http_request_duration_seconds, db_up, app_info, process_*) plus the simulator's own."""
-import time
-
-from prometheus_client import (
-    CONTENT_TYPE_LATEST,
-    CollectorRegistry,
-    Counter,
-    Gauge,
-    Histogram,
-    generate_latest,
-)
 from prometheus_client.core import CounterMetricFamily, GaugeMetricFamily
-from prometheus_client.process_collector import ProcessCollector
 
-from . import __version__
+from .core import metrics as _kit
 
 APP = "cpsim"
-REGISTRY = CollectorRegistry()
-ProcessCollector(registry=REGISTRY)
-REQUESTS = Counter("http_requests_total", "HTTP requests handled", ["app", "method", "route", "status"], registry=REGISTRY)
-LATENCY = Histogram("http_request_duration_seconds", "HTTP request latency", ["app", "route"], registry=REGISTRY,
-                    buckets=(0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10))
-INFO = Gauge("app_info", "Build information", ["app", "version"], registry=REGISTRY)
-INFO.labels(APP, __version__).set(1)
+REGISTRY = _kit.registry          # the kit's registry already carries http_requests_total, http_request_duration_seconds, app_info, process_*
+observe = _kit.observe
+render = _kit.render
 _state = {"runtime": None, "store": None}
 
 
@@ -79,12 +64,3 @@ REGISTRY.register(SimCollector())
 
 def bind(runtime, store) -> None:
     _state["runtime"], _state["store"] = runtime, store
-
-
-def observe(method: str, route: str, status: int, started: float) -> None:
-    REQUESTS.labels(APP, method, route, str(status)).inc()
-    LATENCY.labels(APP, route).observe(time.perf_counter() - started)
-
-
-def render() -> tuple[bytes, str]:
-    return generate_latest(REGISTRY), CONTENT_TYPE_LATEST

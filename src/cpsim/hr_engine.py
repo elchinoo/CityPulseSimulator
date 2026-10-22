@@ -10,6 +10,7 @@ import httpx
 from .hr_gen import Employee, Plan, build_plan
 from .hr_model import Company
 from .sinks import Fatal
+from .tokens import BearerAuth
 
 RETRIES = 5
 MAX_REFS = 5000
@@ -18,9 +19,8 @@ MAX_REFS = 5000
 class TrustDeskClient:
     """Bearer token goes only to the configured URL; redirects are never followed."""
 
-    def __init__(self, url: str, token: str):
-        self.http = httpx.AsyncClient(base_url=url, timeout=30, follow_redirects=False,
-                                      headers={"Authorization": f"Bearer {token}"})
+    def __init__(self, url: str, token):
+        self.http = httpx.AsyncClient(base_url=url, timeout=30, follow_redirects=False, auth=BearerAuth(token))
 
     async def call(self, method: str, path: str, *, json=None, headers=None) -> httpx.Response:
         last = "no answer"

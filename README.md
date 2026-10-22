@@ -94,9 +94,19 @@ sensor's probability by 25 for a few minutes.
 ## Quick start (local)
 
 ```bash
+cp .env.example .env              # set POSTGRES_PASSWORD; DATABASE_URL points at the compose Postgres
+make up                           # postgres:17 on 127.0.0.1:5436
 pip install -e ".[dev]"
-cpsim serve                       # http://127.0.0.1:8000 ; the one-time setup code is printed in the terminal
+set -a; . ./.env; set +a
+cpsim serve                       # applies the migrations, then http://127.0.0.1:8000 ; the setup code is printed in the terminal
 ```
+
+**Postgres is required** (`DATABASE_URL`): cities, companies, the admin password hash, sessions, API tokens and sign-in state all
+live there. Earlier versions could run without a database (a JSON file under `CPSIM_DATA_DIR` and in-memory sessions); that mode is
+gone, and `CPSIM_DATA_DIR` is ignored. **Upgrading from a file-based install:** existing file data is not migrated automatically.
+Run `cpsim import-files <the old CPSIM_DATA_DIR>` once to load its cities, companies and admin password (specs that no longer
+validate are skipped and counted); or simply re-create cities and companies from their YAML/JSON. An install that already used
+Postgres upgrades in place: `cpsim serve` (or `cpsim migrate`) keeps its cities, companies and admin password.
 
 Open the app, enter the setup code, choose a password, click **Create a demo city** (174 sensors over all five
 protocols), set **CityPulse URL**, export the token and press **Start city**:
@@ -113,18 +123,57 @@ city page shows each endpoint). Endpoints bind to loopback unless you tick *Let 
 
 | Variable | Meaning |
 |---|---|
-| `DATABASE_URL` / `DB_EXTERNAL_DSN` / `PSQL_CONNECTION_STRING` | If set, cities and the admin password hash live in Postgres (they survive restarts, the AgentPG way). Otherwise a JSON file in `CPSIM_DATA_DIR` (default `data/`). |
+| `DATABASE_URL` / `DB_EXTERNAL_DSN` / `PSQL_CONNECTION_STRING` | **Required.** The Postgres database (the AgentPG way) holding cities, companies and the credentials below. |
 | `CITYPULSE_INGEST_TOKEN` (or the variable a city names in `token_env`) | The ingest token for that city's CityPulse. Also read from `<NAME>_FILE`. **Never stored in a city.** |
 | `TRUSTDESK_CLIENT_TOKEN` (or the variable a company names in `token_env`) | A TrustDesk token with the *Client application* scope, for Companies. Also read from `<NAME>_FILE`. **Never stored in a company.** |
 | `CPSIM_METRICS_TOKEN` | Lets `/metrics` be scraped with a token that can read nothing else. |
-| `CPSIM_API_KEY` | Optional static full-access key for automation. |
+| `CPSIM_API_KEY` | Optional static full-access key for automation. API tokens (read, metrics or full) can also be created under Settings. |
 | `PAGERLENS_URL`, `PAGERLENS_TOKEN` | Report to PagerLens (an ingest token from PagerLens). https required unless localhost. |
 | `CPSIM_ALLOW_ANONYMOUS` | Demo only: disables authentication entirely. |
+
+## Single sign-on and roles (the ecosystem identity provider)
+
+CityPulse Simulator runs **standalone** (the setup code and an admin password, as above) or **federated** with the ecosystem's
+[identity provider](https://github.com/elchinoo/identity). Register it there as a `web` app with client id `cpsim`, redirect URI
+`https://<simulator>/auth/callback` and the roles below, then set:
+
+| Variable | Meaning |
+|---|---|
+| `CPSIM_OIDC_ISSUER` | The identity provider's URL. Federation is off when unset. |
+| `CPSIM_OIDC_CLIENT_ID` | Default `cpsim`. |
+| `CPSIM_OIDC_CLIENT_SECRET[_FILE]` | The app's secret from the provider. |
+| `CPSIM_PUBLIC_URL` | The URL the simulator is reached at (used to build the callback). |
+| `CPSIM_LOCAL_LOGIN` | `false` removes the admin-password login when SSO is on (default keeps it as a break-glass). |
+
+| Role | May |
+|---|---|
+| `admin` | everything, including the admin password and API tokens |
+| `operator` | see everything; create, change and delete cities and companies; start, stop and boost cities; run, stop and refresh companies. Not tokens, password or `/metrics` |
+| `viewer` | see cities, companies, previews, statistics and run results; change nothing |
+
+Services can use `client_credentials`: scope `cpsim.read` lets a service read (as a viewer does), `cpsim.metrics` lets it scrape
+`/metrics`. The static `CPSIM_API_KEY` stays full access and `CPSIM_METRICS_TOKEN` stays scrape-only. A browser session never
+scrapes `/metrics`. The UI hides what a role cannot do (a viewer sees controls disabled); the server enforces it.
+
+**The simulator as a client of other apps.** Where a city or company names a token variable that is empty
+(`CITYPULSE_INGEST_TOKEN`, `TRUSTDESK_CLIENT_TOKEN`) and for PagerLens reporting (`PAGERLENS_TOKEN`), the simulator can mint a
+short-lived token from the identity provider instead. A static token always wins when set. It needs a **second registration**, a
+`service` client (the web client above may not use `client_credentials`):
+
+| Variable | Meaning |
+|---|---|
+| `CPSIM_OIDC_ISSUER` | The same issuer as above. |
+| `CPSIM_SERVICE_CLIENT_ID` | Default `cpsim-service`. |
+| `CPSIM_SERVICE_CLIENT_SECRET[_FILE]` | Its secret. Setting it turns the feature on. |
+
+Register `cpsim-service` as a `service` client allowed to call the apps `citypulse`, `trustdesk` and `pagerlens`. The simulator keeps
+one token source per callee and asks each only for its own scope: `citypulse.ingest`, `trustdesk.requests.write`, `pagerlens.ingest`.
+There is no per-city or per-company switch: the minted token is used exactly when the named variable is empty.
 
 ## Monitored by PagerLens
 
 Either run `pagerlens-agent` against `/healthz` and `/metrics` (create a scrape token: `CPSIM_METRICS_TOKEN`), or set
-`PAGERLENS_URL`/`PAGERLENS_TOKEN` and the simulator pushes `up`, `request_rate` (readings delivered per second) and
+`PAGERLENS_URL`/`PAGERLENS_TOKEN` (or the service client above) and the simulator pushes `up`, `request_rate` (readings delivered per second) and
 `error_rate` (failed deliveries) for the service `citypulse-simulator`, which *depends on* `citypulse-ingest`, and raises
 `SimulatorCannotReachCityPulse` when delivery keeps failing. `/metrics` also has `cpsim_*` series per city and protocol.
 
@@ -132,24 +181,26 @@ Either run `pagerlens-agent` against `/healthz` and `/metrics` (create a scrape 
 
 ```bash
 agentpg login
-agentpg create --name cpsim-db --size small                 # an instance for the simulator (optional but recommended)
+agentpg create --name cpsim-db --size small                 # an instance for the simulator (required: Postgres holds all state)
 agentpg sandbox create cpsim \
   --image ghcr.io/<owner>/citypulsesimulator:latest \
   --instance <instance-id> --port 8000 \
-  --env CITYPULSE_INGEST_TOKEN=<ingest token> --env CPSIM_METRICS_TOKEN=<random string>
+  --env CITYPULSE_INGEST_TOKEN=<ingest token> --env CPSIM_METRICS_TOKEN=<random string>   # DATABASE_URL comes from the linked instance
 ```
 
 The image must be public on GHCR. `--env` is not a secret store: anyone with access to the sandbox's definition can read
-it, so use a dedicated, narrow `ingest` token that you can revoke. Without a linked database, cities live in the
-container and disappear when it is recreated. Free-tier sandboxes auto-pause when idle, which stops the simulator; a
+it, so use a dedicated, narrow `ingest` token that you can revoke. Free-tier sandboxes auto-pause when idle, which stops the simulator; a
 resumed sandbox restarts cities that have *Start this city when the app starts* ticked. The full walkthrough for all four
 projects is in the CityPulse tutorial.
 
 ## Tests
 
 ```bash
-pip install -e ".[dev]" && ruff check src tests && pytest -q
+pip install -e ".[dev]" && ruff check src tests && pytest -q          # database tests are skipped without TEST_DATABASE_URL
+make up && make test-db                                                  # all of them, on a throwaway database in the compose Postgres
 ```
+
+(The kit, `agentpg-kit`, is installed from the sibling checkout with `uv`, or `pip install "agentpg-kit @ https://github.com/elchinoo/agentpg-kit/archive/refs/tags/v0.1.0.tar.gz"`.)
 
 Covers every protocol stack (including malformed input, dead links, wrong addresses and a pymodbus interoperability
 check), the generator (burst probability rises with the percentage; seeds reproduce; every episode behaves as described),
@@ -165,6 +216,6 @@ validation of cities, a whole city across all five protocols into a sink, back-p
 * One protocol endpoint per protocol per city, hosting up to 32 sensors per device; a city is capped at 10,000 sensors.
 * The gateway and devices share a process, so this shows data-path behaviour and failure modes, not network latency.
 * A protocol's address space caps its devices (PROFIBUS DP: 125 slaves, so 4,000 sensors).
-* Rate limiting of failed sign-ins is in memory, per process. Sessions are in memory and end on restart.
+* Rate limiting of failed sign-ins is in memory, per process. Sessions live in Postgres and survive a restart.
 
 Licensed under Apache-2.0. See [SECURITY.md](SECURITY.md).

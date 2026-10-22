@@ -1,0 +1,17 @@
+# LOCAL DEVELOPMENT ONLY. Set POSTGRES_PASSWORD in your git-ignored .env (see .env.example).
+# The database is bound to 127.0.0.1.
+services:
+  db:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: cpsim
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: cpsim
+    ports: ["127.0.0.1:5436:5432"]
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cpsim"]
+      interval: 3s
+      retries: 20
+volumes:
+  pgdata:

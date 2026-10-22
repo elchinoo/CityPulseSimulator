@@ -6,20 +6,32 @@ Please **do not open a public issue** for security problems. Use GitHub's privat
 
 ## Security model
 
+**Federated sign-in** (optional, `CPSIM_OIDC_ISSUER`)
+- Access tokens are verified locally against the identity provider's JWKS (algorithm allow-list, issuer, audience, expiry), so a
+  token minted for another app or signed by another key is refused. Only the roles of THIS app are honoured, and they are mapped to
+  permissions in `core.py` (`admin`, `operator`, `viewer`); an authenticated person with no role here can do nothing.
+- Browser sign-in is authorization code + PKCE with state and nonce; the session is server-side and carries the person's roles from
+  the verified ID token. Sign-out also ends the single sign-on session. Role changes reach an existing session at its next sign-in.
+- Service tokens carry scopes (`cpsim.read`, `cpsim.metrics`) and nothing more. A browser session, of any role, cannot scrape `/metrics`.
+- Outbound, the simulator may mint tokens with its own `service` client (`CPSIM_SERVICE_CLIENT_SECRET`), one per callee and only
+  with that callee's scope; static tokens win when set. The service secret is read from the environment or a file, never stored.
+
 **Credentials**
 - First run: every protected route is denied. The server prints a one-time setup code to its log; whoever presents it in
   the browser sets the admin password (stored only as a salted scrypt hash, 12-character minimum). The code lives in memory
   and changes on every restart until setup is complete.
-- Browser sessions are random cookies (`HttpOnly`, `SameSite=Strict`, `Secure` over HTTPS), kept in memory as SHA-256 only,
-  12 hours long, ended by sign-out or a password change. Browser writes also need a custom CSRF header.
-- Automation may use `CPSIM_API_KEY` (full access). `/metrics` accepts only `CPSIM_METRICS_TOKEN` (or a full credential); a
+- Browser sessions are random cookies (`HttpOnly`, `SameSite=Strict` for the local login, `Lax` after single sign-on, `Secure` over HTTPS),
+  stored in Postgres as SHA-256 only, 12 hours long, ended by sign-out or a password change. Browser writes also need a custom CSRF header.
+- Automation may use `CPSIM_API_KEY` (full access) or API tokens created under Settings (scope read, metrics or full; stored only as a hash,
+  shown once, revocable). `/metrics` accepts only `CPSIM_METRICS_TOKEN` (or a full credential); a
   metrics token can read nothing else and a browser session cannot scrape.
 - With no credential configured the app denies everything; `CPSIM_ALLOW_ANONYMOUS=true` is an explicit demo-only opt-out.
 - Failed credentials are rate limited (10 per minute per client address, in memory, per process).
 
 **Secrets are never stored in a city.** A city holds only the *name* of the environment variable that carries its CityPulse
-ingest token (validated as an upper-case variable name, so pasting a token there is refused). Cities and the password hash
-are the only things persisted (a JSON file with mode 0600, or Postgres).
+ingest token (validated as an upper-case variable name, so pasting a token there is refused). Cities, companies and the credentials
+above (password hash, session and token hashes) are the only things persisted, in Postgres, which is required. The file store of the
+first release is retired (`cpsim import-files` loads it once).
 
 **Untrusted input.** Every city is validated: names, numbers (finite, bounded), counts (a group at most 5,000, a city 10,000),
 sensor types and protocols from allow-lists, unknown fields rejected. The CityPulse URL must be `https` (plain `http` only for
@@ -42,5 +54,5 @@ cannot point at a database URL or an API key). The TrustDesk client token is sen
 machine; no credentials, no link-local addresses; redirects are never followed). Generated people are invented and use `example.com`
 addresses. A run is bounded (20,000 requests, 2,000 employees, 200 requests per second, 16 connections).
 
-**Known limits.** Rate limiting and sessions are per process. A leaked ingest token lets an attacker push readings to CityPulse
+**Known limits.** Rate limiting is per process. A leaked ingest token lets an attacker push readings to CityPulse
 (bounded by its validation) until revoked; use one token per simulator.

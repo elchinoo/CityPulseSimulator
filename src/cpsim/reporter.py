@@ -1,4 +1,4 @@
-"""Optional: report the simulator's health to PagerLens (PAGERLENS_URL + PAGERLENS_TOKEN, an ingest-scope token).
+"""Optional: report the simulator's health to PagerLens (PAGERLENS_URL + PAGERLENS_TOKEN, an ingest-scope token, or the identity provider's `pagerlens.ingest`).
 
 Service `citypulse-simulator`, which depends on `citypulse-ingest`: it pushes `up`, `request_rate` (readings delivered per
 second) and `error_rate` (share of delivery attempts that failed), and raises `SimulatorCannotReachCityPulse` when delivery
@@ -12,14 +12,15 @@ import httpx
 
 from . import __version__
 from .config import get_settings
+from .tokens import PAGERLENS_INGEST, BearerAuth, outbound_token
 
 SERVICE, DEPENDS = "citypulse-simulator", "citypulse-ingest"
 INTERVAL, FAIL_AFTER = 15, 45
 
 
 class Reporter:
-    def __init__(self, url: str, token: str, runtime):
-        self.client = httpx.AsyncClient(base_url=url, timeout=15, follow_redirects=False, headers={"Authorization": f"Bearer {token}"})
+    def __init__(self, url: str, token, runtime):
+        self.client = httpx.AsyncClient(base_url=url, timeout=15, follow_redirects=False, auth=BearerAuth(token))
         self.runtime, self.registered = runtime, False
         self.prev: dict[str, tuple[int, int]] = {}
         self.failing_since: float | None = None
@@ -68,9 +69,10 @@ class Reporter:
 
 def maybe_start(runtime) -> Reporter | None:
     cfg = get_settings()
-    if not (cfg.pagerlens_url and cfg.pagerlens_token):
+    token = cfg.pagerlens_token or outbound_token("PAGERLENS_TOKEN", PAGERLENS_INGEST)
+    if not (cfg.pagerlens_url and token):
         return None
     if cfg.pagerlens_url.startswith("http://") and not any(h in cfg.pagerlens_url for h in ("//localhost", "//127.0.0.1")):
         print("reporter: refusing to send a token over plain http to a non-local PagerLens", file=sys.stderr)
         return None
-    return Reporter(cfg.pagerlens_url, cfg.pagerlens_token, runtime)
+    return Reporter(cfg.pagerlens_url, token, runtime)
