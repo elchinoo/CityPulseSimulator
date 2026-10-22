@@ -3,7 +3,6 @@
 Permissions are what the code checks (`sim:run`); roles (given to people by the identity provider) and scopes (given to
 services, local API tokens and the static key) are mapped onto them here, in one place.
 """
-import hmac
 
 from apgkit import metrics as metrics_mod
 from apgkit.auth import AppAuth, Authenticator, LocalAuth, Principal, from_env
@@ -44,20 +43,11 @@ APP_AUTH = AppAuth(APP, fed.client_id, ROLE_PERMISSIONS, SCOPE_PERMISSIONS)
 local = LocalAuth(APP_AUTH, env_prefix="CPSIM", token_prefix="cs_", token_scopes={"read", "metrics", "full"})
 
 
-class SimAuthenticator(Authenticator):
-    """The kit's front door, plus the simulator's static CPSIM_METRICS_TOKEN: it may scrape /metrics and nothing else."""
-
-    @staticmethod
-    def metrics_token() -> str:
-        return read_secret("CPSIM_METRICS_TOKEN", "/etc/cpsim/metrics_token")
-
-    def _bearer(self, raw: str) -> Principal | None:
-        token = self.metrics_token()
-        if token and hmac.compare_digest(raw.encode(), token.encode()):
-            return Principal("static", "metrics-token", frozenset({"metrics:scrape"}), name="metrics token")
-        return super()._bearer(raw)
+def metrics_token() -> str:
+    return read_secret("CPSIM_METRICS_TOKEN", "/etc/cpsim/metrics_token")
 
 
-auth = SimAuthenticator(APP_AUTH, local, db, cookie_name=COOKIE, verifier=fed.verifier,
-                        allow_anonymous=lambda: env_bool("CPSIM_ALLOW_ANONYMOUS"))
+# the static CPSIM_METRICS_TOKEN may scrape /metrics and nothing else
+auth = Authenticator(APP_AUTH, local, db, cookie_name=COOKIE, verifier=fed.verifier, allow_anonymous=lambda: env_bool("CPSIM_ALLOW_ANONYMOUS"),
+                     static_tokens=[(metrics_token, Principal("static", "metrics-token", frozenset({"metrics:scrape"}), name="metrics token"))])
 public_url_env = "CPSIM_PUBLIC_URL"

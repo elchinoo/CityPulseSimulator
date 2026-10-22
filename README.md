@@ -200,7 +200,7 @@ pip install -e ".[dev]" && ruff check src tests && pytest -q          # database
 make up && make test-db                                                  # all of them, on a throwaway database in the compose Postgres
 ```
 
-(The kit, `agentpg-kit`, is installed from the sibling checkout with `uv`, or `pip install "agentpg-kit @ https://github.com/elchinoo/agentpg-kit/archive/refs/tags/v0.1.0.tar.gz"`.)
+(The kit, `agentpg-kit`, is installed from the sibling checkout with `uv`, or `pip install "agentpg-kit @ https://github.com/elchinoo/agentpg-kit/archive/refs/tags/v0.2.0.tar.gz"`.)
 
 Covers every protocol stack (including malformed input, dead links, wrong addresses and a pymodbus interoperability
 check), the generator (burst probability rises with the percentage; seeds reproduce; every episode behaves as described),
