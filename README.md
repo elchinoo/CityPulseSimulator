@@ -20,10 +20,16 @@ data reach CityPulse the way it would from a real plant: through **industrial pr
 
 ## Demo cities that differ: the generator
 
-A fixed preset gives the very same city every time. To get cities that differ, **generate** them: each city draws its own number of
-districts (3 to 12 of the twelve in the catalogue), the sensor types that suit each district, group sizes, protocols, frequencies,
+A fixed preset gives the very same city every time. To get cities that differ, **generate** them: each city makes up its own
+districts (3 to 12, each with a kind and a fictional name of its own), the sensor types that suit each district, group sizes, protocols, frequencies,
 burst percentages and sometimes a narrower value range. **Same seed, size and profile give the same city; another seed gives another.**
 
+* **District names are made up per city**, so two cities almost never share one: a district id is `<qualifier>-<noun>` (`alder-quay`,
+  `north-mill`, `linden-heights`, `st-clair-campus`) with about 160 qualifiers and 20 nouns per kind, about 3,100 names per kind and
+  37,000 in all, drawn from the city's seed (same seed, same names; unique within a city, at most 24 characters). The id is the name;
+  screens show it prettified (`Alder Quay`). Measured: 50 medium cities share on average under 0.1% of their district names (no two
+  cities more than one name in common), and across 500 cities about 10% of districts have a name another city also uses. The fixed
+  presets and older files keep the twelve ids `d01` to `d12`; any id of the form `[a-z0-9][a-z0-9_-]{0,23}` is accepted.
 * **Districts have a kind** (harbour, historic, centre, campus, riverside, airport, residential, industrial, green, suburb, market,
   rural) with an affinity for each of the 27 types: a harbour favours water level, wind and bridge vibration; an industrial park air
   quality, noise, power meters and gas leaks; a residential district noise, parking and waste bins; a centre traffic, parking and air
@@ -46,7 +52,8 @@ curl -X POST $URL/api/cities/generate -H "Authorization: Bearer $TOKEN" -H 'Cont
   -d '{"count": 10, "size": "medium", "profile": "coastal", "seed": 42}'
 # optional: name (name-1, name-2... for several), target_url, token_env, autostart
 # -> {"created": 10, "sensors": 19873, "cities": [{"name", "seed", "sensors", "groups", "types", "protocols",
-#      "districts": [{"id", "name", "kind", "sensors", "groups", "types": [...]}]}, ...]}
+#      "districts": [{"id": "alder-quay", "name": "Alder Quay", "kind": "harbour", "sensors", "groups", "types": [...]}]}, ...]}
+#    (the kind is not part of the city file format; it is in this response, the CLI -v output and the YAML header comment)
 ```
 
 City *n* of a batch uses seed + *n*, so the batch is reproducible. **Headless** (no Postgres, no network):

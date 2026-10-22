@@ -1,6 +1,7 @@
 """Demo-city generator: seeded variability, so ten cities are never ten copies of one.
 
-Same seed, size and profile give the same city; another seed gives another one. A city picks 3 to 12 of the catalogue's districts,
+Same seed, size and profile give the same city; another seed gives another one. A city makes up 3 to 12 districts of its own (a kind
+such as harbour or industrial and a fictional name such as `alder-quay`, see districts.py: two cities almost never share one),
 gives each district the sensor types that plausibly belong there (a harbour has water levels and vibration, an industrial park has
 air quality, noise and power, a residential district has noise, parking and waste), draws group sizes from a skewed distribution
 (a few big groups, many small), and gives each group its own protocol, frequency, burst percentage and sometimes a narrower range.
@@ -12,7 +13,8 @@ import random
 import re
 from dataclasses import dataclass
 
-from .catalog import DISTRICT_KINDS, DISTRICTS, TYPES
+from .catalog import TYPES
+from .districts import KINDS, district_id, pretty
 from .model import (
     DEVICE_LIMITS,
     MAX_CITY_SENSORS,
@@ -28,6 +30,7 @@ SIZES = {"small": 200, "medium": 2_000, "large": 20_000}      # target sensors; 
 PROFILES = ("balanced", "industrial", "coastal", "tourist", "residential", "mixed")
 MIN_SENSORS = 8
 MAX_COUNT = 50
+MAX_DISTRICTS = 12
 BASE = 0.25               # affinity of a type that is not listed for a kind: unlikely, never impossible
 
 # Affinity (0 to 10) of each sensor type for each kind of district; unlisted types get BASE.
@@ -235,13 +238,24 @@ def generate_city(seed: int, size="medium", profile: str = "mixed", name: str | 
         low, high = 5, 12
     else:
         low, high = 3, 12
-    n_districts = max(3, min(len(DISTRICTS), total // 2, round(rng.uniform(low - 0.5, high + 0.5))))
+    n_districts = max(3, min(MAX_DISTRICTS, total // 2, round(rng.uniform(low - 0.5, high + 0.5))))
     if profile == "mixed":
-        mix = {kind: math.exp(rng.gauss(0, 1.1)) for kind in set(DISTRICT_KINDS.values())}
+        mix = {kind: math.exp(rng.gauss(0, 1.1)) for kind in KINDS}
     else:
-        mix = {kind: PROFILE_DISTRICTS[profile].get(kind, 1) for kind in set(DISTRICT_KINDS.values())}
-    ids = _pick(rng, {d: mix[DISTRICT_KINDS[d]] * rng.uniform(0.6, 1.4) for d in DISTRICTS}, n_districts)
-    ids.sort()
+        mix = {kind: PROFILE_DISTRICTS[profile].get(kind, 1) for kind in KINDS}
+    kinds: list[str] = []                                     # a kind may repeat (two harbours), each repeat less likely
+    for _ in range(n_districts):
+        w = {k: mix[k] * rng.uniform(0.6, 1.4) / (3 ** kinds.count(k)) for k in KINDS}
+        kinds.append(rng.choices(list(w), list(w.values()))[0])
+    names: set[str] = set()
+    named = []
+    for kind in kinds:
+        d = district_id(rng, kind, names)
+        names.add(d)
+        named.append((d, kind))
+    named.sort()
+    ids = [d for d, _ in named]
+    kind_of = dict(named)
     type_boost = PROFILE_TYPES.get(profile, {})
     if profile == "mixed":                                    # a mixed city leans on two or three themes of its own
         for theme in rng.sample([t for t in PROFILE_TYPES.values()], 2):
@@ -252,7 +266,7 @@ def generate_city(seed: int, size="medium", profile: str = "mixed", name: str | 
     per_district = max(1, MAX_GROUPS // len(ids))
     plan: list[tuple[str, str]] = []                         # (district, type) in a stable order
     for d in ids:
-        aff = AFFINITY[DISTRICT_KINDS[d]]
+        aff = AFFINITY[kind_of[d]]
         weights = {k: (aff.get(k, BASE) * type_boost.get(k, 1)) ** 1.3 * rng.uniform(0.5, 1.5) for k in TYPES}
         want = min(per_district, len(TYPES), max(2, round(rng.triangular(2, 9, 4))), max(1, total // (3 * len(ids))))
         plan += [(d, k) for k in _pick(rng, weights, want)]
@@ -290,7 +304,7 @@ def generate_city(seed: int, size="medium", profile: str = "mixed", name: str | 
     city = {"name": city_name, "target_url": target_url, "token_env": token_env, "seed": seed,
             "poll_interval": rng.choices(*zip(*POLL_CHOICES))[0], "expose": False, "autostart": bool(autostart), "groups": groups}
     parse_city(city)                                          # never hand out something the rest of the app would refuse
-    districts = [{"id": d, "name": DISTRICTS[d], "kind": DISTRICT_KINDS[d],
+    districts = [{"id": d, "name": pretty(d), "kind": kind_of[d],
                   "sensors": sum(g["count"] for g in groups if g["district"] == d),
                   "groups": sum(1 for g in groups if g["district"] == d),
                   "types": [g["type"] for g in groups if g["district"] == d]} for d in ids]
@@ -346,8 +360,9 @@ def render(g: Generated, fmt: str = "yaml") -> str:
         return json.dumps(spec, indent=2) + "\n"
     import yaml
 
+    listing = [d["id"] + " [" + d["kind"] + "]" for d in g.districts]
     head = (f"# Generated demo city: seed {spec['seed']}, size {g.size}, profile {g.profile}, {g.sensors} sensors in "
-            f"{len(g.districts)} districts ({', '.join(d['name'] for d in g.districts)}).\n"
+            f"{len(g.districts)} districts ({', '.join(listing)}).\n"
             "# Secrets never go here: token_env names the ENVIRONMENT VARIABLE that holds the CityPulse ingest token.\n")
     groups = spec.pop("groups")
     body = yaml.safe_dump(spec, sort_keys=False)

@@ -1,6 +1,9 @@
 """POST /api/cities/generate: what each role may do and what it creates (needs TEST_DATABASE_URL)."""
 from test_federation_db import access, client  # noqa: F401  (the provider, role tokens and the app client)
 
+from cpsim.catalog import DISTRICT_ID
+from cpsim.districts import pretty
+
 CITY = {"groups": [{"type": "temperature", "count": 8}]}
 
 
@@ -27,7 +30,13 @@ def test_generate_creates_varied_cities_and_reports_them(client):  # noqa: F811
         assert all({"id", "name", "kind", "sensors", "types"} <= set(d) for d in c["districts"])
         assert sum(d["sensors"] for d in c["districts"]) == c["sensors"]
     assert len({c["name"] for c in out["cities"]}) == 10
-    assert len({tuple(d["id"] for d in c["districts"]) for c in out["cities"]}) >= 7
+    assert len({tuple(d["id"] for d in c["districts"]) for c in out["cities"]}) == 10
+    names = [d["id"] for c in out["cities"] for d in c["districts"]]
+    assert len(set(names)) >= 0.9 * len(names)                                         # each city has its own district names
+    kinds = cat_kinds(client, op)
+    for c in out["cities"]:
+        for d in c["districts"]:
+            assert DISTRICT_ID.match(d["id"]) and d["kind"] in kinds and d["name"] == pretty(d["id"])
     saved = {c["name"]: c for c in client.get("/api/cities", headers=op).json()}
     assert set(saved) == {c["name"] for c in out["cities"]} and all(saved[c["name"]]["sensors"] == c["sensors"] for c in out["cities"])
     one = client.get(f"/api/cities/{out['cities'][0]['name']}", headers=op).json()
@@ -35,6 +44,10 @@ def test_generate_creates_varied_cities_and_reports_them(client):  # noqa: F811
     again = client.post("/api/cities/generate", headers=op, json={"count": 10, "size": "medium", "profile": "mixed", "seed": 5}).json()
     assert not {c["name"] for c in again["cities"]} & set(saved)                      # never replaces an existing city
     assert [c["districts"] for c in again["cities"]] == [c["districts"] for c in out["cities"]]   # same seeds, same cities
+
+
+def cat_kinds(client, op):  # noqa: F811
+    return client.get("/api/catalog", headers=op).json()["generator"]["district_kinds"]
 
 
 def test_generate_options_and_refusals(client):  # noqa: F811
@@ -52,6 +65,7 @@ def test_generate_options_and_refusals(client):  # noqa: F811
     assert len(client.get("/api/cities", headers=op).json()) == 3                     # refusals created nothing
     cat = client.get("/api/catalog", headers=op).json()
     assert "mixed" in cat["generator"]["profiles"] and cat["generator"]["max_count"] == 50 and cat["districts"][0]["kind"] == "harbour"
+    assert len(cat["generator"]["district_kinds"]) == 12 and cat["generator"]["district_names"] >= 3000
 
 
 def test_generated_cities_can_start_and_are_not_changed_by_the_fixed_presets(client):  # noqa: F811

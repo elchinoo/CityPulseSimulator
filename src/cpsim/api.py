@@ -17,6 +17,8 @@ from pydantic import BaseModel, Field
 from . import __version__, auth, citygen, core, credentials, metrics, reporter
 from .catalog import DISTRICT_KINDS, DISTRICTS, GROUPS, TYPES
 from .core import COOKIE, CSRF_HEADER, fed, local
+from .districts import KINDS as DISTRICT_KIND_NAMES
+from .districts import NOUNS, QUALIFIERS
 from .hr_catalog import DEPARTMENTS
 from .hr_catalog import TYPES as HR_TYPES
 from .hr_gen import build_plan
@@ -370,8 +372,9 @@ def delete_credential(name: str):
 def catalog():
     return {"types": [{"key": t.key, "label": t.label, "unit": t.unit, "group": t.group, "lo": t.lo, "hi": t.hi,
                        "interval": t.interval} for t in TYPES.values()],
-            "groups": GROUPS, "districts": [{"id": k, "name": v, "kind": DISTRICT_KINDS[k]} for k, v in DISTRICTS.items()],
-            "generator": {"sizes": citygen.SIZES, "profiles": list(citygen.PROFILES), "max_count": citygen.MAX_COUNT},
+            "groups": GROUPS, "districts": [{"id": k, "name": v, "kind": DISTRICT_KINDS[k]} for k, v in DISTRICTS.items()],   # the fixed presets' ids; any id of the district rule is valid
+            "generator": {"sizes": citygen.SIZES, "profiles": list(citygen.PROFILES), "max_count": citygen.MAX_COUNT,
+                          "district_kinds": list(DISTRICT_KIND_NAMES), "district_names": len(QUALIFIERS) * sum(len(v) for v in NOUNS.values())},
             "protocols": list(PROTOCOL_CHOICES),
             "limits": {"group_count": MAX_GROUP_COUNT, "city_sensors": MAX_CITY_SENSORS, "channels_per_device": MAX_CHANNELS,
                        "devices": DEVICE_LIMITS}}

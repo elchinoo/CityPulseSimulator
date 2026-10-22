@@ -246,7 +246,7 @@ def _generate_cities(args) -> int:
         print(f"{r['name']:<26}{r['seed']:>11}{r['sensors']:>9}{len(r['districts']):>10}{r['groups']:>8}  {', '.join(r['protocols'])}")
         if args.verbose:
             for d in r["districts"]:
-                print(f"    {d['id']} {d['name']} ({d['kind']}): {d['sensors']} sensors, {', '.join(d['types'])}")
+                print(f"    {d['id']:<24} {d['kind']:<12} {d['sensors']:>6} sensors  {', '.join(d['types'])}")
     print(f"{len(cities)} cities" + (f" written to {out}" if out else " (use --out DIR to write the files)"))
     return 0
 

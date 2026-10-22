@@ -30,15 +30,17 @@ globalThis.window = { dispatchEvent() {}, addEventListener() {} };
 globalThis.CustomEvent = class {};
 globalThis.location = { origin: "http://x", hash: "#cities", search: "", pathname: "/" };
 
-const catalog = { types: [], districts: [], protocols: ["direct", "modbus_tcp"], limits: { city_sensors: 10000, group_count: 5000 },
+const catalog = { types: [{ key: "noise", label: "Noise", unit: "dB", lo: 20, hi: 140 }], districts: [], protocols: ["direct", "modbus_tcp"], limits: { city_sensors: 10000, group_count: 5000 },
   generator: { sizes: { small: 200, medium: 2000, large: 20000 }, profiles: ["balanced", "industrial", "coastal", "tourist", "residential", "mixed"], max_count: 50 } };
 const created = { created: 2, sensors: 2300, cities: [
-  { name: "tide-port", seed: 5, sensors: 1200, groups: 9, types: 8, protocols: ["direct", "profinet"], districts: [{ id: "d01", name: "Harbor" }, { id: "d03", name: "Financial Quarter" }] },
-  { name: "alder-vale", seed: 6, sensors: 1100, groups: 7, types: 6, protocols: ["modbus_tcp"], districts: [{ id: "d09", name: "Green Valley" }] }] };
+  { name: "tide-port", seed: 5, sensors: 1200, groups: 9, types: 8, protocols: ["direct", "profinet"], districts: [{ id: "alder-quay", name: "Alder Quay", kind: "harbour" }, { id: "linden-heights", name: "Linden Heights", kind: "residential" }] },
+  { name: "alder-vale", seed: 6, sensors: 1100, groups: 7, types: 6, protocols: ["modbus_tcp"], districts: [{ id: "north-mill", name: "North Mill", kind: "industrial" }] }] };
 const calls = [];
 globalThis.fetch = async (p, init = {}) => {
   calls.push({ p, method: init.method || "GET", body: init.body });
-  const body = p === "/api/catalog" ? catalog : p === "/api/cities/generate" ? created : [];
+  const city = { name: "tide-port", target_url: "", token_env: "CITYPULSE_INGEST_TOKEN", seed: 5, poll_interval: 2, expose: false, autostart: false, running: false,
+  groups: [{ type: "noise", count: 3, district: "alder-quay", protocol: "direct", frequency: 30, burst_pct: 5 }] };
+  const body = p === "/api/catalog" ? catalog : p === "/api/cities/tide-port" ? city : p === "/api/cities/generate" ? created : [];
   return { ok: true, status: 200, headers: { get: () => "application/json" }, json: async () => body, text: async () => JSON.stringify(body) };
 };
 const { state } = await import("/kit/session.js");
@@ -46,6 +48,7 @@ state.session = { state: "logged_in", user: { permissions: ["*"] } };
 const { initCities } = await import("/static/cities.js");
 await initCities();
 
+function El_defaultSelect() { const c = document.createElement; document.createElement = (t) => { const e = c(t); if (t === "select") e.value = "noise"; return e; }; }
 const find = (el, pred) => (pred(el) ? el : (el.children || []).map((c) => (c && c.children ? find(c, pred) : null)).find(Boolean));
 const byId = (id) => find(document.getElementById("view-cities"), (e) => e.attrs?.id === id);
 const text = (el) => (el.data ?? "") + (el.textContent ?? "") + (el.children || []).map(text).join(" ");
@@ -69,7 +72,12 @@ if (sent.count !== 2 || sent.size !== "small" || sent.profile !== "coastal" || s
 const table = byId("gen-summary");
 if (!table) fail("no summary table after generating");
 const t = text(table);
-for (const want of ["tide-port", "alder-vale", "1,200", "Harbor, Financial Quarter", "Green Valley", "profinet"]) if (!t.includes(want)) fail(`summary lacks ${want}`);
+for (const want of ["tide-port", "alder-vale", "1,200", "Alder Quay (harbour), Linden Heights (residential)", "North Mill (industrial)", "profinet"]) if (!t.includes(want)) fail(`summary lacks ${want}`);
 if (find(table, (e) => e.tag === "tr" && e.listeners.click) === undefined) fail("rows should open the city");
+El_defaultSelect();
+await initCities(["tide-port"]);                  // a city page offers its own (generated) districts, not only d01..d12
+const dist = byId("g-district");
+if (!dist || dist.tag !== "input" || dist.attrs.list !== "g-district-list") fail("the district is not a free id input with suggestions");
+if (dist.value !== "alder-quay" || !byId("g-district-list").children.some((o) => o.value === "alder-quay")) fail("a generated district is not suggested");
 console.log("ok: the generate form posts its choices and summarises the created cities");
 process.exit(0);

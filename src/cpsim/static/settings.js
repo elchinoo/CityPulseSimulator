@@ -42,6 +42,9 @@ function tokensCard() {
 function credentialsCard() {
   const box = h("div", {});
   const note = h("p", { class: "muted" });
+  // Saving or deleting one credential redraws the table; whatever is being typed in the other rows (and the focus) must survive that.
+  const typed = new Map();
+  let focused = null;
   async function render() {
     const d = await api("/api/credentials");
     note.textContent = d.unlocked ? "" : "The credential store is locked: the app has no CPSIM_ENCRYPTION_KEY, so nothing can be saved. Signing in with the admin password unlocks it for this session.";
@@ -49,9 +52,14 @@ function credentialsCard() {
       h("thead", {}, h("tr", {}, ...["Name", "Source", "Used by", "New value", ""].map((t) => h("th", {}, t)))),
       h("tbody", {}, ...d.items.map((c) => {
         const input = h("input", { type: "password", autocomplete: "off", maxlength: "4096", placeholder: c.saved ? "replace saved value" : "paste the credential", disabled: !d.unlocked, "aria-label": `New value for ${c.name}` });
+        input.value = typed.get(c.name) || "";
+        input.addEventListener("input", () => typed.set(c.name, input.value));
+        input.addEventListener("focus", () => { focused = c.name; });
+        input.addEventListener("blur", () => { if (focused === c.name) focused = null; });
+        if (focused === c.name) queueMicrotask(() => input.focus?.());
         const save = async () => {
           if (!input.value) return;
-          try { await api(`/api/credentials/${encodeURIComponent(c.name)}`, { method: "PUT", json: { value: input.value } }); input.value = ""; toast("Saved"); render(); } catch (err) { toast(err.message, true); }
+          try { await api(`/api/credentials/${encodeURIComponent(c.name)}`, { method: "PUT", json: { value: input.value } }); input.value = ""; typed.delete(c.name); toast("Saved"); render(); } catch (err) { toast(err.message, true); }
         };
         input.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); save(); } });
         return h("tr", {}, h("td", { class: "title" }, h("code", {}, c.name)),

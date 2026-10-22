@@ -66,7 +66,7 @@ function generatorCard(cat) {
 function summaryTable(r) {
   const rows = r.cities.map((c) => h("tr", { class: "clickable", onclick: () => { location.hash = `#cities/${c.name}`; } },
     h("td", { class: "title" }, c.name), h("td", { class: "num" }, c.sensors.toLocaleString()), h("td", { class: "num" }, c.districts.length),
-    h("td", {}, c.districts.map((d) => d.name).join(", ")), h("td", { class: "num" }, c.types), h("td", {}, c.protocols.map(label).join(", ")), h("td", { class: "num" }, c.seed)));
+    h("td", {}, c.districts.map((d) => d.kind ? `${d.name} (${d.kind})` : d.name).join(", ")), h("td", { class: "num" }, c.types), h("td", {}, c.protocols.map(label).join(", ")), h("td", { class: "num" }, c.seed)));
   return h("div", {}, h("h3", {}, `Created ${r.created} ${r.created === 1 ? "city" : "cities"}, ${r.sensors.toLocaleString()} sensors in all`),
     h("div", { class: "card flush" }, h("table", { id: "gen-summary" }, h("thead", {}, h("tr", {}, ...["City", "Sensors", "Districts", "Which", "Types", "Protocols", "Seed"].map((t) => h("th", {}, t)))), h("tbody", {}, ...rows))));
 }
@@ -151,7 +151,10 @@ async function renderCity(box, name) {
   // groups
   const typeSel = h("select", { id: "g-type" }, ...catalog.types.map((t) => h("option", { value: t.key }, `${t.label} (${t.unit})`)));
   const count = h("input", { id: "g-count", type: "number", min: "1", max: catalog.limits.group_count, value: "10" });
-  const district = h("select", { id: "g-district" }, ...catalog.districts.map((d) => h("option", { value: d.id }, `${d.id} ${d.name}`)));
+  // a district is any short id (alder-quay, d01): the ones this city already uses and the fixed presets' ids are suggested
+  const known = [...new Set([...spec.groups.map((g) => g.district), ...catalog.districts.map((d) => d.id)])];
+  const district = h("input", { id: "g-district", value: known[0] || "d01", list: "g-district-list", maxlength: "24", required: true, pattern: "[a-z0-9][a-z0-9_-]{0,23}", autocomplete: "off" });
+  const districtList = h("datalist", { id: "g-district-list" }, ...known.map((d) => h("option", { value: d })));
   const proto = h("select", { id: "g-proto" }, ...catalog.protocols.map((p) => h("option", { value: p }, label(p))));
   const lo = h("input", { id: "g-lo", type: "number", step: "any" });
   const hi = h("input", { id: "g-hi", type: "number", step: "any" });
@@ -163,15 +166,15 @@ async function renderCity(box, name) {
   setHint();
   const addGroup = h("form", { onsubmit: (e) => {
     e.preventDefault();
-    const g = { type: typeSel.value, count: Number(count.value), district: district.value, protocol: proto.value, frequency: Number(freq.value), burst_pct: Number(burst.value) };
+    const g = { type: typeSel.value, count: Number(count.value), district: district.value.trim(), protocol: proto.value, frequency: Number(freq.value), burst_pct: Number(burst.value) };
     if (lo.value !== "") g.lo = Number(lo.value);
     if (hi.value !== "") g.hi = Number(hi.value);
     save({ ...spec, groups: [...spec.groups, g] }, "Group added");
   } },
-  h("div", { class: "grid3" }, field("Sensor type", typeSel), field("How many", count), field("District", district)),
+  h("div", { class: "grid3" }, field("Sensor type", typeSel), field("How many", count), field("District", district, "A short id such as alder-quay or d01.")),
   h("div", { class: "grid3" }, field("Protocol", proto, "How the data reaches the gateway."), field("Range from", lo), field("Range to", hi)),
   h("div", { class: "grid3" }, field("Every (seconds)", freq), field("Burst percentage", burst, "0 never, 100 constantly: how likely a sensor is to enter a random burst episode (spike, noise, stuck, dropout, flood, corrupt).")),
-  hint, h("div", { class: "btns" }, h("button", { class: "primary", type: "submit", disabled: locked }, "Add sensor group")));
+  hint, districtList, h("div", { class: "btns" }, h("button", { class: "primary", type: "submit", disabled: locked }, "Add sensor group")));
 
   const groupRows = spec.groups.map((g, i) => h("tr", {}, h("td", {}, g.type.replace("_", " ")), h("td", { class: "num" }, g.count.toLocaleString()), h("td", {}, g.district),
     h("td", {}, label(g.protocol)), h("td", {}, g.lo != null || g.hi != null ? `${g.lo ?? "…"} to ${g.hi ?? "…"}` : "usual"), h("td", { class: "num" }, `${g.frequency}s`),

@@ -1,4 +1,5 @@
 """The demo-city generator: seeded variability within the limits, and the headless `cpsim cities generate`."""
+import itertools
 import json
 import os
 import subprocess
@@ -7,8 +8,9 @@ from pathlib import Path
 
 import pytest
 
-from cpsim import citygen
-from cpsim.catalog import DISTRICTS, TYPES
+from cpsim import citygen, districts
+from cpsim.catalog import DISTRICT_ID, TYPES
+from cpsim.engine import CityRunner
 from cpsim.model import MAX_CITY_SENSORS, MAX_GROUPS, NAME, SpecError, city_id, parse_city
 from cpsim.protocols.image import MAX_CHANNELS
 
@@ -74,7 +76,7 @@ def test_limits_hold_for_every_size_and_profile():
             for g in citygen.generate_cities(8, size, profile, seed=11):
                 city = parse_city(g.city)                                         # validity, including every protocol's device limit
                 assert city.sensor_count() <= MAX_CITY_SENSORS and len(city.groups) <= MAX_GROUPS
-                assert all(x.district in DISTRICTS and x.type in TYPES for x in city.groups)
+                assert all(DISTRICT_ID.match(x.district) and x.type in TYPES for x in city.groups)
                 assert 3 <= len({x.district for x in city.groups}) <= 12
                 seen = [(x.district, x.type) for x in city.groups]
                 assert len(seen) == len(set(seen))                                 # a type once per district
@@ -100,6 +102,62 @@ def test_every_protocol_and_wide_ranges_of_frequency_burst_and_range_appear():
         assert t.lo <= x["lo"] < x["hi"] <= t.hi
 
 
+def test_district_vocabulary_is_large_and_every_name_is_a_valid_id():
+    assert len(districts.QUALIFIERS) >= 40 and set(districts.NOUNS) == set(citygen.AFFINITY)
+    for kind, nouns in districts.NOUNS.items():
+        assert len(nouns) >= 8, kind
+        for q in districts.QUALIFIERS:
+            for n in nouns:
+                assert DISTRICT_ID.match(f"{q}-{n}") and len(f"{q}-{n}") <= 24, (q, n)
+    assert sum(len(districts.QUALIFIERS) * len(n) for n in districts.NOUNS.values()) >= 3000
+    assert districts.pretty("alder-quay") == "Alder Quay" and districts.pretty("st-clair-campus") == "St Clair Campus"
+
+
+def test_districts_are_unique_within_a_city_valid_and_suit_their_kind():
+    for profile in citygen.PROFILES:
+        for c in citygen.generate_cities(30, "large", profile, seed=7):
+            ids = [d["id"] for d in c.districts]
+            assert len(ids) == len(set(ids)) and all(DISTRICT_ID.match(i) for i in ids)
+            for d in c.districts:
+                assert d["kind"] in districts.NOUNS and d["id"].startswith(tuple(districts.QUALIFIERS))
+                assert d["id"].endswith(tuple(districts.NOUNS[d["kind"]])) and d["name"] == districts.pretty(d["id"])
+            assert {g["district"] for g in c.city["groups"]} == set(ids)
+
+
+def test_district_names_are_deterministic_per_seed():
+    a = citygen.generate_city(77, "medium", "mixed").districts
+    assert a == citygen.generate_city(77, "medium", "mixed").districts
+    assert [d["id"] for d in a] != [d["id"] for d in citygen.generate_city(78, "medium", "mixed").districts]
+
+
+def test_district_names_rarely_collide_across_cities():
+    sets = [{d["id"] for d in c.districts} for c in citygen.generate_cities(50, "medium", "mixed", seed=1000)]
+    pairs = list(itertools.combinations(sets, 2))
+    assert sum(len(a & b) / len(a | b) for a, b in pairs) / len(pairs) < 0.05
+    assert max(len(a & b) for a, b in pairs) <= 2
+    for profile in ("mixed", "industrial"):                # 500 cities: how many (city, district) names appear in another city
+        names = [d["id"] for i in range(10) for c in citygen.generate_cities(50, "medium", profile, seed=7 + 50 * i) for d in c.districts]
+        counts = {n: names.count(n) for n in set(names)}
+        assert sum(v for v in counts.values() if v > 1) / len(names) < 0.15, profile
+
+
+def test_sensor_ids_with_generated_districts_stay_valid_and_unique():
+    from cpsim.catalog import SENSOR_ID
+
+    for c in citygen.generate_cities(6, "small", "balanced", seed=3, name="x" * 40) + citygen.generate_cities(6, "small", "mixed", seed=3):
+        ids = [s.id for s in CityRunner(parse_city(c.city)).sensors]
+        assert len(ids) == len(set(ids)) and all(SENSOR_ID.match(i) for i in ids)
+
+
+def test_legacy_and_generated_district_ids_both_parse():
+    base = {"name": "demo", "groups": [{"type": "noise", "count": 2, "district": "d01"}, {"type": "noise", "count": 2, "district": "alder-quay"}]}
+    assert [g.district for g in parse_city(base).groups] == ["d01", "alder-quay"]
+    for bad in ("Alder Quay", "x" * 25, "-quay", ""):
+        base["groups"][1]["district"] = bad
+        with pytest.raises(SpecError, match="such as d01 or alder-quay"):
+            parse_city(base)
+
+
 def test_types_follow_the_kind_of_district():
     from cpsim.catalog import DISTRICT_KINDS
 
@@ -113,7 +171,7 @@ def test_types_follow_the_kind_of_district():
                     vals.append(sum(1 for t in d["types"] if t in types) / len(d["types"]))
         return sum(vals) / len(vals)
 
-    assert DISTRICT_KINDS["d01"] == "harbour"
+    assert DISTRICT_KINDS["d01"] == "harbour"                                       # the legacy ids keep their kinds
     assert mean_share("harbour", {"water_level", "bridge_vibration", "wind_speed"}) > 0.3
     assert mean_share("industrial", {"air_quality", "noise", "smart_meter", "gas_leak"}) > 0.35
     assert mean_share("residential", {"noise", "parking", "waste_bin", "street_light"}) > 0.4
@@ -207,7 +265,9 @@ def test_cli_generates_files_without_postgres(tmp_path):
 def test_cli_json_verbose_and_errors(tmp_path):
     r = cpsim("cities", "generate", "--count", "2", "--size", "300", "--seed", "1", "--format", "json", "-v", "--name", "demo",
               "--out", str(tmp_path))
-    assert r.returncode == 0 and (tmp_path / "demo-1.json").exists() and "    d" in r.stdout and "(" in r.stdout
+    assert r.returncode == 0 and (tmp_path / "demo-1.json").exists() and any(k in r.stdout for k in districts.NOUNS)
+    first = citygen.generate_cities(2, 300, "mixed", seed=1, name="demo")[0]
+    assert all(d["id"] in r.stdout and d["kind"] in r.stdout for d in first.districts)
     assert parse_city(json.loads((tmp_path / "demo-2.json").read_text())).name == "demo-2"
     no_out = cpsim("cities", "generate", "--count", "2", "--seed", "1")
     assert no_out.returncode == 0 and "use --out" in no_out.stdout

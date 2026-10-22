@@ -111,7 +111,7 @@ def parse_group(d: dict) -> Group:
         raise SpecError(f"count must be a whole number from 1 to {MAX_GROUP_COUNT}")
     district = d.get("district", "d01")
     if not isinstance(district, str) or not DISTRICT_ID.match(district):
-        raise SpecError("district must be a short id such as d01")
+        raise SpecError("district must be a short id such as d01 or alder-quay (lowercase letters, digits, dashes and underscores, up to 24 characters)")
     protocol = d.get("protocol", "direct")
     if protocol not in PROTOCOL_CHOICES:
         raise SpecError(f"protocol must be one of {', '.join(PROTOCOL_CHOICES)}")
