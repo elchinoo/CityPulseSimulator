@@ -22,9 +22,27 @@ function setPath(obj, path, value) {
 }
 
 // ---- the list ------------------------------------------------------------------------------------
+function listTable(list) {
+  const rows = list.map((w) => {
+    const s = w.stats;
+    return h("tr", { class: "clickable", onclick: () => { location.hash = `#workloads/${w.name}`; } },
+      h("td", { class: "title" }, w.name), h("td", {}, kindOf(w.kind)?.label || w.kind), h("td", { class: "muted" }, w.target_url || "generate only"),
+      h("td", { class: "num" }, `${w.batch} / ${w.interval} s`),
+      h("td", {}, h("span", { class: `st ${STATE[w.state] || "offline"}` }, w.state)),
+      h("td", { class: "num" }, s ? s.items.toLocaleString() : "0"), h("td", { class: "num" }, s ? s.skipped : "0"),
+      h("td", { class: "num" }, s ? ms(s.latency_p95) : "n/a"),
+      h("td", { class: "wrap" + (s && s.last_error ? " bad" : "") }, s ? s.last_error : ""));
+  });
+  return list.length ? h("div", { class: "card flush" }, h("table", {}, h("thead", {}, h("tr", {}, ...["Workload", "Kind", "Sends to", "Batch / every", "State", "Items", "Skipped", "p95", "Last error"].map((t) => h("th", {}, t)))), h("tbody", {}, ...rows)))
+    : h("div", { class: "card" }, h("p", { class: "empty" }, "No workloads yet. Create one below, for example a PayBroker payment stream every 2 seconds."));
+}
+
+// Only the table is redrawn on a timer: the "New workload" form below it must keep what the person is typing.
 async function renderList(box) {
   let list;
   try { list = await api("/api/workloads"); } catch (err) { fill(box, h("p", { class: "error" }, err.message)); return; }
+  const tableBox = h("div", {});
+  tableBox.append(listTable(list));
   const name = h("input", { id: "nwl-name", required: true, maxlength: "40", placeholder: "shop-traffic", pattern: "[a-z0-9][a-z0-9-]*" });
   const kind = h("select", { id: "nwl-kind" }, ...catalog.kinds.map((k) => h("option", { value: k.key }, k.label)));
   const err = h("p", { class: "error", role: "alert" });
@@ -42,27 +60,19 @@ async function renderList(box) {
     }
     try { await api(`/api/workloads/${name.value}`, { method: "PUT", json: spec }); location.hash = `#workloads/${name.value}`; } catch (e) { err.textContent = e.message; }
   };
-  const rows = list.map((w) => {
-    const s = w.stats;
-    return h("tr", { class: "clickable", onclick: () => { location.hash = `#workloads/${w.name}`; } },
-      h("td", { class: "title" }, w.name), h("td", {}, kindOf(w.kind)?.label || w.kind), h("td", { class: "muted" }, w.target_url || "generate only"),
-      h("td", { class: "num" }, `${w.batch} / ${w.interval} s`),
-      h("td", {}, h("span", { class: `st ${STATE[w.state] || "offline"}` }, w.state)),
-      h("td", { class: "num" }, s ? s.items.toLocaleString() : "0"), h("td", { class: "num" }, s ? s.skipped : "0"),
-      h("td", { class: "num" }, s ? ms(s.latency_p95) : "n/a"),
-      h("td", { class: "wrap" + (s && s.last_error ? " bad" : "") }, s ? s.last_error : ""));
-  });
   fill(box, h("h1", {}, "Workloads"),
     h("p", { class: "muted" }, "A workload pushes simulated traffic to one of the other apps on a schedule: every 2 or 5 seconds, say. "
       + "Pick the kind, set the interval, how many items per tick and what to send. Cities stream to CityPulse on their own schedule (their poll interval and sensor frequency)."),
-    list.length ? h("div", { class: "card flush" }, h("table", {}, h("thead", {}, h("tr", {}, ...["Workload", "Kind", "Sends to", "Batch / every", "State", "Items", "Skipped", "p95", "Last error"].map((t) => h("th", {}, t)))), h("tbody", {}, ...rows)))
-      : h("div", { class: "card" }, h("p", { class: "empty" }, "No workloads yet. Create one below, for example a PayBroker payment stream every 2 seconds.")),
+    tableBox,
     h("h2", { class: "section-title" }, "New workload"),
     h("div", { class: "card" }, h("div", { class: "grid2" }, field("Name", name, "Lowercase letters, digits and dashes."), field("Kind", kind)),
       h("div", { class: "btns" }, h("button", { class: "primary", type: "button", onclick: create }, "Create")), err));
   guard(box);
   clearInterval(timer);
-  timer = setInterval(() => { if (location.hash === "#workloads") renderList(box); else clearInterval(timer); }, 3000);
+  timer = setInterval(async () => {
+    if (location.hash !== "#workloads") { clearInterval(timer); return; }
+    try { tableBox.replaceChildren(listTable(await api("/api/workloads"))); } catch { /* the next tick tries again */ }
+  }, 3000);
 }
 
 // ---- live numbers of one workload ---------------------------------------------------------------------
