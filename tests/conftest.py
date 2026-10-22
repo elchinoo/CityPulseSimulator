@@ -4,7 +4,8 @@ from urllib.parse import urlsplit
 import pytest
 
 for name in ("DB_EXTERNAL_DSN", "PSQL_CONNECTION_STRING", "CPSIM_API_KEY", "CPSIM_ALLOW_ANONYMOUS", "CPSIM_OIDC_ISSUER",
-             "CPSIM_SERVICE_CLIENT_SECRET", "PAGERLENS_URL", "PAGERLENS_TOKEN", "CPSIM_METRICS_TOKEN"):
+             "CPSIM_SERVICE_CLIENT_SECRET", "PAGERLENS_URL", "PAGERLENS_TOKEN", "CPSIM_METRICS_TOKEN", "CPSIM_MAX_RATE",
+             "CPSIM_ALLOW_HTTP_TARGETS", "PAYBROKER_SECRET_KEY", "LLMGW_CLIENT_KEY"):
     os.environ.pop(name, None)
 os.environ["CPSIM_API_KEY_FILE"] = "/nonexistent/key"
 os.environ["CPSIM_METRICS_TOKEN_FILE"] = "/nonexistent/key"
@@ -32,4 +33,6 @@ def db():
     core.local._setup_code = None
     api._announced = False
     api.runtime.hr_runs.clear()
+    api.runtime.wl_runners.clear()
+    api.runtime.company_schedules.clear()
     yield

@@ -71,6 +71,7 @@ async function renderCompany(box, name) {
   let c;
   try { c = await api(`/api/companies/${name}`); } catch (err) { fill(box, h("p", { class: "error" }, err.message), h("a", { href: "#companies" }, "← all companies")); return; }
   const running = c.state === "running";
+  const schedRunning = c.schedule_run?.state === "running";
   const err = h("p", { class: "error", role: "alert" });
   const url = h("input", { id: "co-url", value: c.target_url, disabled: running, placeholder: "https://your-trustdesk… (empty: generate only)" });
   const tokenEnv = h("input", { id: "co-token", value: c.token_env, disabled: running, maxlength: "64" });
@@ -84,6 +85,15 @@ async function renderCompany(box, name) {
   const fRate = num("co-rate", c.rate, { min: "0.1", max: "200", step: "0.1" });
   const fConc = num("co-conc", c.concurrency, { min: "1", max: "16" });
   const fPrefix = h("input", { id: "co-prefix", value: c.employee_prefix, disabled: running, maxlength: "8" });
+
+  const sc = c.schedule || {};
+  const fSchedOn = h("input", { id: "co-sched-on", type: "checkbox", checked: !!c.schedule, disabled: running || schedRunning });
+  const fEvery = num("co-sched-every", sc.interval ?? 60, { min: "5", max: "86400", step: "1" });
+  const fJit = num("co-sched-jit", sc.jitter_pct ?? 0, { min: "0", max: "50" });
+  const fDur = num("co-sched-dur", sc.duration, { min: "1", placeholder: "forever" });
+  const fRuns = num("co-sched-runs", sc.runs, { min: "1", placeholder: "forever" });
+  const fBoot = h("input", { id: "co-sched-boot", type: "checkbox", checked: !!sc.start_on_boot, disabled: running || schedRunning });
+  for (const el of [fEvery, fJit, fDur, fRuns]) el.disabled = running || schedRunning;
 
   const counts = {};
   const total = h("strong", {}, "0");
@@ -101,6 +111,8 @@ async function renderCompany(box, name) {
     target_url: url.value.trim(), token_env: tokenEnv.value.trim(), seed: fSeed.value === "" ? null : Number(fSeed.value),
     employees: { new: Number(fNew.value), tenured: Number(fTen.value), use_existing: fUse.checked },
     requests: Object.fromEntries(Object.entries(counts).map(([k, el]) => [k, Number(el.value) || 0]).filter(([, n]) => n > 0)),
+    schedule: fSchedOn.checked ? { interval: Number(fEvery.value), jitter_pct: Number(fJit.value), duration: fDur.value === "" ? null : Number(fDur.value),
+      runs: fRuns.value === "" ? null : Number(fRuns.value), start_on_boot: fBoot.checked } : null,
     problem_pct: Number(fProb.value), withdraw_pct: Number(fWd.value), rate: Number(fRate.value), concurrency: Number(fConc.value),
     employee_prefix: fPrefix.value.trim(),
   });
@@ -120,6 +132,11 @@ async function renderCompany(box, name) {
     err.textContent = "";
     if (path === "run" && !(await save(true))) return;
     try { await api(`/api/companies/${name}/${path}`, { method: "POST" }); if (msg) toast(msg); renderCompany(box, name); } catch (e) { err.textContent = e.message; }
+  };
+  const actSched = (path, msg) => async () => {
+    err.textContent = "";
+    if (path === "start" && !(await save(true))) return;
+    try { await api(`/api/companies/${name}/schedule/${path}`, { method: "POST" }); toast(msg); renderCompany(box, name); } catch (e) { err.textContent = e.message; }
   };
   const refresh = async (e) => {
     e.target.disabled = true;
@@ -145,7 +162,13 @@ async function renderCompany(box, name) {
     h("div", { class: "grid3" }, field("Problem requests (%)", fProb, "How many are built to break a typical policy: too little notice, over a limit, no receipt, overlapping leave, duplicates."),
       field("Withdrawn after sending (%)", fWd), field("Random seed", fSeed, "Same seed, same people and requests.")),
     h("div", { class: "grid3" }, field("Requests per second (at most)", fRate), field("Parallel connections", fConc)),
-    h("div", { class: "btns" }, h("button", { class: "primary", type: "submit", disabled: running }, "Save")));
+    h("h3", {}, "Repeat on a schedule"),
+    h("label", { class: "check", for: "co-sched-on" }, fSchedOn, " Run this company again and again (recurring requests for TrustDesk)"),
+    h("div", { class: "grid3" }, field("Every (seconds between run starts)", fEvery, "5 to 86400. A run that is still going makes the next tick skip."),
+      field("Jitter (%)", fJit), field("Stop after (seconds)", fDur, "Empty: forever.")),
+    h("div", { class: "grid3" }, field("Stop after (runs)", fRuns, "Empty: forever.")),
+    h("label", { class: "check", for: "co-sched-boot" }, fBoot, " Start the schedule when the app starts"),
+    h("div", { class: "btns" }, h("button", { class: "primary", type: "submit", disabled: running || schedRunning }, "Save")));
 
   fill(box, h("a", { href: "#companies" }, "← all companies"), h("h1", {}, c.name),
     h("div", { class: "card burst-big" },
@@ -153,7 +176,11 @@ async function renderCompany(box, name) {
         : h("button", { class: "primary", type: "button", onclick: act("run", "Started") }, "Save and run"),
       h("button", { class: "secondary", type: "button", disabled: running, "data-ro-ok": "1", onclick: doPreview }, "Preview"),
       h("button", { class: "secondary", type: "button", onclick: refresh }, "Refresh TrustDesk statuses"),
+      schedRunning ? h("button", { class: "secondary", type: "button", onclick: actSched("stop", "Schedule stopped") }, "Stop schedule")
+        : h("button", { class: "secondary", type: "button", disabled: running || !c.schedule, onclick: actSched("start", "Schedule started") }, "Start schedule"),
       h("span", { class: "muted" }, running ? "Running: settings are locked until it stops." : "Preview shows what would be sent without sending anything.")),
+    c.schedule_run ? h("p", { class: "muted" }, `Schedule ${c.schedule_run.state}: ${c.schedule_run.ticks} runs started, ${c.schedule_run.skipped} ticks skipped, ${c.schedule_run.items} requests`
+      + (c.schedule_run.last_error ? `, last error: ${c.schedule_run.last_error}` : "") + (c.schedule_run.fatal ? `, stopped: ${c.schedule_run.fatal}` : "")) : null,
     err, live, preview,
     h("h2", { class: "section-title" }, "What to send"), h("div", { class: "card" }, form),
     h("div", { class: "btns" }, h("button", { class: "danger", type: "button", onclick: async () => { if (!confirm(`Delete ${name}?`)) return; await api(`/api/companies/${name}`, { method: "DELETE" }); location.hash = "#companies"; } }, "Delete company")));

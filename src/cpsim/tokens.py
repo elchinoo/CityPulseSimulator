@@ -15,6 +15,7 @@ from apgkit.config import read_secret
 CITYPULSE_INGEST = "citypulse.ingest"
 TRUSTDESK_CLIENT = "trustdesk.requests.write"
 PAGERLENS_INGEST = "pagerlens.ingest"
+LLMGW_USE = "llmgw.use"
 
 _sources: dict[tuple[str, str, str], TokenSource] = {}
 

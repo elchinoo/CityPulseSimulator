@@ -20,9 +20,10 @@ metrics = metrics_mod.Metrics(APP, __version__)
 
 ALL = frozenset({"*"})
 PERMISSIONS = {
-    "sim:read": "see cities, companies, the catalogs, previews, statistics and run results",
-    "sim:run": "start, stop and boost cities; run, stop and refresh companies (sends readings and requests to other apps)",
-    "sim:edit": "create, change and delete cities and companies",
+    "sim:read": "see cities, companies, workloads, the catalogs, previews, statistics and run results",
+    "sim:run": "start, stop and boost cities; run, stop and refresh companies; start, stop and run workloads once (sends readings, "
+               "requests and traffic to other apps)",
+    "sim:edit": "create, change and delete cities, companies and workloads",
     "settings:manage": "admin password and API tokens",
     "metrics:scrape": "scrape /metrics",
 }

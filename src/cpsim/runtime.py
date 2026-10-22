@@ -1,10 +1,14 @@
 """Owns the running cities. Everything runs in the app's event loop."""
+from . import kinds
 from .engine import CityRunner
 from .hr_engine import HrRun, TrustDeskClient
 from .hr_model import Company, parse_company
 from .model import City, SpecError, parse_city
+from .schedule import company_schedule, max_rate
 from .sinks import HttpSink, NullSink
 from .tokens import CITYPULSE_INGEST, TRUSTDESK_CLIENT, outbound_token
+from .wl_model import Workload, parse_workload
+from .wl_runner import WorkloadRunner
 
 
 class Runtime:
@@ -12,6 +16,8 @@ class Runtime:
         self.store = store
         self.runners: dict[str, CityRunner] = {}
         self.hr_runs: dict[str, HrRun] = {}     # the latest run of each company (kept after it ends, for its results)
+        self.wl_runners: dict[str, WorkloadRunner] = {}         # the latest runner of each workload (kept after it ends, for its counters)
+        self.company_schedules: dict[str, WorkloadRunner] = {}  # companies that repeat their run on a schedule
 
     def specs(self) -> dict[str, City]:
         out = {}
@@ -58,6 +64,10 @@ class Runtime:
             await self.stop(name)
         for name in list(self.hr_runs):
             await self.stop_hr(name)
+        for name in list(self.wl_runners):
+            await self.stop_workload(name)
+        for name in list(self.company_schedules):
+            await self.stop_company_schedule(name)
 
     async def autostart(self) -> None:
         for name, city in self.specs().items():
@@ -66,6 +76,18 @@ class Runtime:
                     await self.start(name)
                 except SpecError as exc:
                     print(f"cpsim: cannot autostart {name}: {exc}", flush=True)
+        for name, wl in self.workloads().items():
+            if wl.schedule.start_on_boot:
+                try:
+                    self.start_workload(name)
+                except (SpecError, RuntimeError) as exc:
+                    print(f"cpsim: cannot autostart workload {name}: {exc}", flush=True)
+        for name, company in self.companies().items():
+            if company.schedule and company.schedule["start_on_boot"]:
+                try:
+                    self.start_company_schedule(name)
+                except (SpecError, RuntimeError) as exc:
+                    print(f"cpsim: cannot autostart the schedule of {name}: {exc}", flush=True)
 
     # ---- companies (simulated employers sending requests to TrustDesk) -----------------------------------------
     def companies(self) -> dict[str, Company]:
@@ -80,26 +102,34 @@ class Runtime:
     def company(self, name: str) -> Company | None:
         return self.companies().get(name)
 
+    def _hr_client_factory(self, company: Company):
+        """A function that builds the TrustDesk client of a company (None: generate only). Raises SpecError when the token is missing."""
+        if not company.target_url:
+            return None
+        token = outbound_token(company.token_env, TRUSTDESK_CLIENT)
+        if not token:
+            raise SpecError(f"the environment variable {company.token_env} is empty: set it to a TrustDesk "
+                            f"client token for {company.target_url} "
+                            "(or configure the service client of the identity provider: see CPSIM_SERVICE_CLIENT_SECRET)")
+
+        def make():
+            return TrustDeskClient(company.target_url, token)
+        return make
+
     def start_hr(self, name: str) -> HrRun:
         company = self.company(name)
         if company is None:
             raise KeyError(name)
+        return self._launch_hr(company)
+
+    def _launch_hr(self, company: Company) -> HrRun:
+        name = company.name
         current = self.hr_runs.get(name)
         if current and current.running:
             raise RuntimeError("this company is already running")
         if company.total_requests() == 0 and (company.new_employees + company.tenured_employees) == 0:
             raise SpecError("add employees or requests first")
-        make = None
-        if company.target_url:
-            token = outbound_token(company.token_env, TRUSTDESK_CLIENT)
-            if not token:
-                raise SpecError(f"the environment variable {company.token_env} is empty: set it to a TrustDesk "
-                                f"client token for {company.target_url} "
-                                "(or configure the service client of the identity provider: see CPSIM_SERVICE_CLIENT_SECRET)")
-
-            def make():  # noqa: E306
-                return TrustDeskClient(company.target_url, token)
-        run = HrRun(company, make)
+        run = HrRun(company, self._hr_client_factory(company))
         self.hr_runs[name] = run
         run.start()
         return run
@@ -117,3 +147,96 @@ class Runtime:
     def snapshots(self) -> list[dict]:
         return [r.snapshot() for r in self.runners.values()]
 
+
+    # ---- workloads: scheduled pushes to the other apps ---------------------------------------------------------------
+    def workloads(self) -> dict[str, Workload]:
+        out = {}
+        for name, raw in self.store.workloads().items():
+            try:
+                out[name] = parse_workload(raw)
+            except SpecError:
+                continue            # a hand-edited spec that no longer validates is skipped, not trusted
+        return out
+
+    def workload(self, name: str) -> Workload | None:
+        return self.workloads().get(name)
+
+    def _check_rate(self, wl: Workload, exclude: str = "") -> None:
+        """The global ceiling: running workloads together may not ask for more than CPSIM_MAX_RATE items per second."""
+        if wl.kind == "trustdesk":
+            return
+        total = wl.schedule.rate() + sum(r.workload.schedule.rate() for n, r in self.wl_runners.items()
+                                         if r.running and n != exclude and r.workload.kind != "trustdesk")
+        if total > max_rate():
+            raise SpecError(f"running workloads would ask for {total:g} items/s in all, above the ceiling CPSIM_MAX_RATE={max_rate():g}")
+
+    def _sender_factory(self, wl: Workload):
+        token = kinds.credential(wl)
+        company = start_run = None
+        if wl.kind == "trustdesk":
+            company = self.company(wl.params["company"])
+            if company is None:
+                raise SpecError(f"there is no company named {wl.params['company']!r}: create it under Companies first")
+            self._hr_client_factory(company)         # fail now, not at the first tick, when its token is missing
+            start_run = self._launch_hr
+        return lambda: kinds.build_sender(wl, token=token, company=company, start_run=start_run)
+
+    def _runner(self, wl: Workload, name: str | None = None) -> WorkloadRunner:
+        return WorkloadRunner(wl, self._sender_factory(wl), name=name)
+
+    def start_workload(self, name: str) -> WorkloadRunner:
+        wl = self.workload(name)
+        if wl is None:
+            raise KeyError(name)
+        current = self.wl_runners.get(name)
+        if current and current.running:
+            raise RuntimeError("this workload is already running")
+        self._check_rate(wl, exclude=name)
+        runner = self._runner(wl)
+        runner.start()
+        self.wl_runners[name] = runner
+        return runner
+
+    async def stop_workload(self, name: str) -> bool:
+        runner = self.wl_runners.get(name)
+        if runner and runner.running:
+            await runner.stop()
+            return True
+        return False
+
+    async def run_workload_once(self, name: str) -> dict:
+        wl = self.workload(name)
+        if wl is None:
+            raise KeyError(name)
+        current = self.wl_runners.get(name)
+        if current and current.running:
+            raise RuntimeError("this workload is running: stop it first")
+        self._check_rate(wl, exclude=name)
+        runner = self._runner(wl)
+        self.wl_runners[name] = runner
+        return await runner.run_once()
+
+    def start_company_schedule(self, name: str) -> WorkloadRunner:
+        company = self.company(name)
+        if company is None:
+            raise KeyError(name)
+        if not company.schedule:
+            raise SpecError("this company has no schedule: set one first")
+        current = self.company_schedules.get(name)
+        if current and current.running:
+            raise RuntimeError("this company's schedule is already running")
+        wl = Workload(name, "trustdesk", company.target_url, "", "", {"company": name}, company_schedule(company.schedule))
+        runner = self._runner(wl, name=f"company/{name}")
+        runner.start()
+        self.company_schedules[name] = runner
+        return runner
+
+    async def stop_company_schedule(self, name: str) -> bool:
+        runner = self.company_schedules.get(name)
+        if runner and runner.running:
+            await runner.stop()
+            return True
+        return False
+
+    def workload_snapshots(self) -> list[dict]:
+        return [r.snapshot() for r in (*self.wl_runners.values(), *self.company_schedules.values())]

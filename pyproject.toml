@@ -1,6 +1,6 @@
 [project]
 name = "cpsim"
-version = "0.1.0"
+version = "0.2.0"
 description = "CityPulse Simulator: cities of simulated sensors that speak Modbus TCP, EtherNet/IP, EtherCAT, PROFINET and PROFIBUS through an edge gateway."
 requires-python = ">=3.11"
 license = "Apache-2.0"

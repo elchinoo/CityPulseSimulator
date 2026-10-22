@@ -23,7 +23,7 @@ def test_a_database_of_the_first_release_upgrades_in_place(db):
         c.execute("INSERT INTO cpsim_setting VALUES ('admin_password_hash', %s)", (passwords.hash_password("correct-horse-battery"),))
         c.execute("INSERT INTO cpsim_city VALUES ('oldtown', %s)", (json.dumps(CITY),))
         c.commit()
-    assert migrate.run() == ["001_init.sql"]
+    assert migrate.run() == ["001_init.sql", "002_workloads.sql"]
     assert migrate.run() == []                                   # idempotent
     assert PgStore().cities()["oldtown"]["groups"][0]["count"] == 3
     with database.connect() as c:
@@ -44,3 +44,29 @@ def test_import_files_loads_cities_companies_and_the_admin_password(db, tmp_path
     assert import_files(str(tmp_path))["admin_password"] == 0   # never overwrites an existing admin password
     with pytest.raises(FileNotFoundError):
         import_files(str(tmp_path / "missing"))
+
+
+def test_a_deployment_on_the_previous_schema_gains_workloads_and_keeps_everything(db, tmp_path):
+    """Apply only the old migration (what a running install has), put data in it, then run the new code's migrations."""
+    from apgkit import migrate as kit_migrate
+
+    with database.connect() as c:
+        c.execute("DROP SCHEMA public CASCADE; CREATE SCHEMA public")
+        c.commit()
+    (tmp_path / "001_init.sql").write_text((migrate.MIGRATIONS / "001_init.sql").read_text())
+    assert kit_migrate.run(database, tmp_path) == ["001_init.sql"]
+    company = {"name": "oldco", "employees": {"new": 1, "tenured": 1}, "requests": {"vacation": 2}}          # a company saved before schedules existed
+    with database.connect() as c:
+        c.execute("INSERT INTO cpsim_city VALUES ('oldtown', %s)", (json.dumps(CITY),))
+        c.execute("INSERT INTO cpsim_company VALUES ('oldco', %s)", (json.dumps(company),))
+        c.commit()
+    assert migrate.run() == ["002_workloads.sql"]
+    assert migrate.run() == []
+    store = PgStore()
+    assert store.workloads() == {} and store.cities()["oldtown"]["groups"][0]["count"] == 3
+    from cpsim.hr_model import parse_company
+    assert parse_company(store.companies()["oldco"]).schedule is None, "an old company has no schedule and parses as before"
+    store.save_workload("w", {"name": "w", "kind": "llmgw"})
+    assert list(store.workloads()) == ["w"]
+    store.delete_workload("w")
+    assert store.workloads() == {}

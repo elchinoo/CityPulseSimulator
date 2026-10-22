@@ -88,6 +88,10 @@ class HrRun:
         if self._task:
             await asyncio.gather(self._task, return_exceptions=True)
 
+    async def wait(self) -> None:
+        if self._task:
+            await asyncio.gather(self._task, return_exceptions=True)
+
     @property
     def running(self) -> bool:
         return self.state == "running"

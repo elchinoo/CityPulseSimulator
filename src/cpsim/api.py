@@ -21,6 +21,7 @@ from .hr_catalog import DEPARTMENTS
 from .hr_catalog import TYPES as HR_TYPES
 from .hr_gen import build_plan
 from .hr_model import MAX_EMPLOYEES, MAX_PER_TYPE, MAX_TOTAL, parse_company
+from .kinds import KINDS, MANAGED_ELSEWHERE
 from .model import (
     DEVICE_LIMITS,
     MAX_CITY_SENSORS,
@@ -31,7 +32,9 @@ from .model import (
 )
 from .protocols.image import MAX_CHANNELS
 from .runtime import Runtime
+from .schedule import MAX_BATCH, MAX_INTERVAL, MIN_INTERVAL, max_rate
 from .store import open_store
+from .wl_model import parse_workload
 
 STATIC = Path(__file__).resolve().parent / "static"
 MAX_BODY = 512 * 1024
@@ -446,7 +449,9 @@ def _company_summary(name: str, c) -> dict:
     run = runtime.hr_runs.get(name)
     return {"name": name, "target_url": c.target_url, "employees": c.new_employees + c.tenured_employees,
             "requests": c.total_requests(), "types": len(c.requests), "problem_pct": c.problem_pct,
-            "state": run.state if run else "idle", "dry_run": not c.target_url}
+            "state": run.state if run else "idle", "dry_run": not c.target_url,
+            "scheduled": bool(runtime.company_schedules.get(name) and runtime.company_schedules[name].running),
+            "every": c.schedule["interval"] if c.schedule else None}
 
 
 @app.get("/api/companies", dependencies=[Depends(require("sim:read"))])
@@ -463,14 +468,16 @@ def get_company(name: str):
     if c is None:
         raise HTTPException(404, "no such company")
     run = runtime.hr_runs.get(name)
-    return {**c.to_dict(), "state": run.state if run else "idle"}
+    sched = runtime.company_schedules.get(name)
+    return {**c.to_dict(), "state": run.state if run else "idle", "schedule_run": sched.snapshot() if sched else None}
 
 
 @app.put("/api/companies/{name}", dependencies=[Depends(require("sim:edit"))])
 def put_company(name: str, spec: dict):
     run = runtime.hr_runs.get(name)
-    if run and run.running:
-        raise HTTPException(409, "stop the company before changing it")
+    sched = runtime.company_schedules.get(name)
+    if (run and run.running) or (sched and sched.running):
+        raise HTTPException(409, "stop the company (and its schedule) before changing it")
     try:
         c = parse_company({**spec, "name": name})
     except SpecError as exc:
@@ -481,8 +488,10 @@ def put_company(name: str, spec: dict):
 
 @app.delete("/api/companies/{name}", dependencies=[Depends(require("sim:edit"))])
 async def delete_company(name: str):
+    await runtime.stop_company_schedule(name)
     await runtime.stop_hr(name)
     runtime.hr_runs.pop(name, None)
+    runtime.company_schedules.pop(name, None)
     runtime.store.delete_company(name)
     return {"ok": True}
 
@@ -548,3 +557,138 @@ async def refresh_company(name: str):
     except Exception as exc:  # noqa: BLE001 - e.g. the token was revoked meanwhile
         raise HTTPException(502, f"could not read the statuses: {exc}") from exc
     return run.snapshot()
+
+
+@app.post("/api/companies/{name}/schedule/start", dependencies=[Depends(require("sim:run"))])
+async def start_company_schedule(name: str):
+    """Repeat the company's run on its schedule (every `interval` seconds)."""
+    try:
+        runner = runtime.start_company_schedule(name)
+    except KeyError as exc:
+        raise HTTPException(404, "no such company") from exc
+    except RuntimeError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except SpecError as exc:
+        raise _bad(exc) from exc
+    return runner.snapshot()
+
+
+@app.post("/api/companies/{name}/schedule/stop", dependencies=[Depends(require("sim:run"))])
+async def stop_company_schedule(name: str):
+    return {"stopped": await runtime.stop_company_schedule(name)}
+
+
+# --- workloads: scheduled pushes to the other apps of the ecosystem ---------------------------------------------------------
+
+@app.get("/api/workloads/catalog", dependencies=[Depends(require("sim:read"))])
+def workload_catalog():
+    return {"kinds": [{"key": k.name, "label": k.label, "description": k.description, "token_env": k.token_env, "scope": k.scope,
+                       "min_interval": max(k.min_interval, MIN_INTERVAL), "max_batch": min(k.max_batch, MAX_BATCH),
+                       "schedule": k.schedule, "params": k.defaults(), "fields": k.fields, "presets": k.presets,
+                       "url_hint": k.url_hint, "env_hint": k.env_hint} for k in KINDS.values()],
+            "managed_elsewhere": MANAGED_ELSEWHERE,
+            "limits": {"interval": [MIN_INTERVAL, MAX_INTERVAL], "batch": MAX_BATCH, "max_rate": max_rate()}}
+
+
+def _workload_summary(name: str, wl) -> dict:
+    runner = runtime.wl_runners.get(name)
+    snap = runner.snapshot() if runner else None
+    return {"name": name, "kind": wl.kind, "target_url": wl.target_url, "interval": wl.schedule.interval, "batch": wl.schedule.batch,
+            "start_on_boot": wl.schedule.start_on_boot, "state": snap["state"] if snap else "idle", "stats": snap}
+
+
+@app.get("/api/workloads", dependencies=[Depends(require("sim:read"))])
+def list_workloads():
+    try:
+        return [_workload_summary(n, w) for n, w in runtime.workloads().items()]
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(503, "the state store is unavailable") from exc
+
+
+@app.get("/api/workloads/{name}", dependencies=[Depends(require("sim:read"))])
+def get_workload(name: str):
+    wl = runtime.workload(name)
+    if wl is None:
+        raise HTTPException(404, "no such workload")
+    runner = runtime.wl_runners.get(name)
+    return {**wl.to_dict(), "state": runner.state if runner else "idle"}
+
+
+@app.put("/api/workloads/{name}", dependencies=[Depends(require("sim:edit"))])
+def put_workload(name: str, spec: dict):
+    """Create or replace a workload. A running one must be stopped first."""
+    runner = runtime.wl_runners.get(name)
+    if runner and runner.running:
+        raise HTTPException(409, "stop the workload before changing it")
+    try:
+        wl = parse_workload({**spec, "name": name})
+    except SpecError as exc:
+        raise _bad(exc) from exc
+    store.save_workload(name, wl.to_dict())
+    return {"ok": True, "rate": round(wl.schedule.rate(), 3)}
+
+
+@app.delete("/api/workloads/{name}", dependencies=[Depends(require("sim:edit"))])
+async def delete_workload(name: str):
+    await runtime.stop_workload(name)
+    runtime.wl_runners.pop(name, None)
+    store.delete_workload(name)
+    return {"ok": True}
+
+
+@app.get("/api/workloads/{name}/status", dependencies=[Depends(require("sim:read"))])
+def workload_status(name: str):
+    runner = runtime.wl_runners.get(name)
+    if runner is None:
+        raise HTTPException(404, "this workload has not run yet")
+    return runner.snapshot()
+
+
+@app.post("/api/workloads/{name}/start", dependencies=[Depends(require("sim:run"))])
+async def start_workload(name: str):
+    try:
+        runner = runtime.start_workload(name)
+    except KeyError as exc:
+        raise HTTPException(404, "no such workload") from exc
+    except RuntimeError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except SpecError as exc:
+        raise _bad(exc) from exc
+    return runner.snapshot()
+
+
+@app.post("/api/workloads/{name}/stop", dependencies=[Depends(require("sim:run"))])
+async def stop_workload(name: str):
+    return {"stopped": await runtime.stop_workload(name)}
+
+
+@app.post("/api/workloads/{name}/run-once", dependencies=[Depends(require("sim:run"))])
+async def run_workload_once(name: str):
+    """One batch now, outside the schedule (it still counts in the workload's numbers)."""
+    try:
+        return await runtime.run_workload_once(name)
+    except KeyError as exc:
+        raise HTTPException(404, "no such workload") from exc
+    except RuntimeError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except SpecError as exc:
+        raise _bad(exc) from exc
+
+
+class ScenarioBody(BaseModel):
+    scenario: str = Field(max_length=20)
+
+
+@app.post("/api/workloads/{name}/scenario", dependencies=[Depends(require("sim:run"))])
+def set_workload_scenario(name: str, body: ScenarioBody):
+    """PagerLens workloads: switch the failure scenario of a RUNNING workload (healthy, bad_deploy, error_spike, latency, silence)."""
+    runner = runtime.wl_runners.get(name)
+    if runner is None or not runner.running:
+        raise HTTPException(409, "the workload is not running")
+    if not hasattr(runner.sender, "set_scenario"):
+        raise HTTPException(409, "this kind of workload has no scenarios")
+    try:
+        runner.sender.set_scenario(body.scenario)
+    except SpecError as exc:
+        raise _bad(exc) from exc
+    return runner.snapshot()

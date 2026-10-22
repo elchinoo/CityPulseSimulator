@@ -1,0 +1,13 @@
+# CityPulse: a city IS the CityPulse workload. `kind: citypulse` expands to a "live feed" city of direct sensors:
+# schedule.interval is the seconds between readings of each sensor (a city's own schedule: poll_interval and group frequency).
+#   cpsim workloads run examples/live/citypulse.yaml
+# CITYPULSE_URL and an ingest token in CITYPULSE_INGEST_TOKEN (or a service token with scope citypulse.ingest).
+# Bigger cities with industrial protocols are cities proper: see examples/metropolis.yaml and `cpsim run`.
+workloads:
+  - name: live-feed
+    kind: citypulse
+    target_url: ${CITYPULSE_URL}
+    token_env: CITYPULSE_INGEST_TOKEN
+    params: {sensors: 60, seed: 7}
+    schedule:
+      interval: 2                # 60 sensors, a reading from each every 2 seconds

@@ -8,11 +8,12 @@ from dataclasses import asdict, dataclass, field
 
 from .hr_catalog import TYPES
 from .model import ENV_NAME, NAME, SpecError, check_target
+from .schedule import parse_company_schedule
 
 MAX_PER_TYPE, MAX_TOTAL, MAX_EMPLOYEES = 5000, 20_000, 2000
 PREFIX = re.compile(r"^[A-Z][A-Z0-9]{0,7}$")
 FIELDS = {"name", "target_url", "token_env", "seed", "employees", "requests", "problem_pct", "withdraw_pct",
-          "rate", "concurrency", "employee_prefix"}
+          "rate", "concurrency", "employee_prefix", "schedule"}
 
 
 @dataclass
@@ -30,6 +31,7 @@ class Company:
     rate: float = 5.0                      # requests per second, at most
     concurrency: int = 4
     employee_prefix: str = "SIM"
+    schedule: dict | None = None           # repeat the whole run: {interval, jitter_pct, duration, runs, start_on_boot}
 
     def total_requests(self) -> int:
         return sum(self.requests.values())
@@ -96,4 +98,5 @@ def parse_company(d: dict) -> Company:
         raise SpecError("employee_prefix must be 1 to 8 capital letters or digits, starting with a letter")
     return Company(name, check_target(d.get("target_url") or ""), token_env, seed, new, tenured, use_existing, clean,
                    _num(d.get("problem_pct", 25), "problem_pct", 0, 100), _num(d.get("withdraw_pct", 3), "withdraw_pct", 0, 30),
-                   _num(d.get("rate", 5), "rate", 0.1, 200), _whole(d.get("concurrency", 4), "concurrency", 1, 16), prefix)
+                   _num(d.get("rate", 5), "rate", 0.1, 200), _whole(d.get("concurrency", 4), "concurrency", 1, 16), prefix,
+                   parse_company_schedule(d.get("schedule")))

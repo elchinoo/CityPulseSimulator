@@ -1,0 +1,19 @@
+# Recurring requests for TrustDesk: the company below is run again every 60 seconds.
+#   cpsim workloads run examples/live/trustdesk.yaml
+# TRUSTDESK_URL and a TrustDesk token with the Client application scope in TRUSTDESK_CLIENT_TOKEN (or a service token with
+# scope trustdesk.requests.write). A fixed seed moves on by one per run, so every run sends new requests.
+companies:
+  - name: acme
+    target_url: ${TRUSTDESK_URL}
+    token_env: TRUSTDESK_CLIENT_TOKEN
+    seed: 100
+    employees: {new: 4, tenured: 12}
+    requests: {vacation: 6, sick_leave: 4, expense_travel: 4, expense_meals: 4, remote_work: 2}
+    problem_pct: 25
+    rate: 5
+workloads:
+  - name: hr-recurring
+    kind: trustdesk
+    params: {company: acme}
+    schedule:
+      interval: 60               # seconds between run starts; a run that is still going makes the next tick skip

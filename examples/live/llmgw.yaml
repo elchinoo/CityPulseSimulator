@@ -1,0 +1,18 @@
+# Chat and embedding calls for the LLM gateway:  cpsim workloads run examples/live/llmgw.yaml
+# LLMGW_URL and a client key in LLMGW_CLIENT_KEY (lg_...). With no key, a service token with scope llmgw.use is used instead
+# (CPSIM_OIDC_ISSUER + CPSIM_SERVICE_CLIENT_ID/_SECRET); the gateway needs a registered client named like the service client id.
+workloads:
+  - name: gateway-traffic
+    kind: llmgw
+    target_url: ${LLMGW_URL}
+    token_env: LLMGW_CLIENT_KEY
+    params:
+      chat_models: [echo-chat]          # the gateway's model aliases
+      embedding_models: [echo-embed]
+      chat_pct: 80
+      max_tokens_min: 16
+      max_tokens_max: 128
+    schedule:
+      interval: 5
+      batch: 2
+      concurrency: 2

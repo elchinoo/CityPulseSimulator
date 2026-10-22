@@ -134,3 +134,7 @@ td.num.bad { color: var(--err); font-weight: 700; }
 .pad { padding: 1rem 1rem 0; margin: 0; }
 .st.bad { background: color-mix(in srgb, var(--bad) 16%, transparent); color: var(--bad); }
 .kinds + h3, h3 { margin: 1.4rem 0 .4rem; }
+
+/* ---- workloads ---- */
+td.bad { color: var(--err); }
+td.wrap.bad { font-size: .85rem; }

@@ -1,0 +1,61 @@
+# Run the simulator's workloads locally in Docker against the LIVE apps. No Postgres needed: the container runs the headless CLI
+# (`cpsim workloads run <file>`), prints one status line every few seconds and stops with Ctrl-C.
+#
+#   cp .env.live.example .env.live            # URLs and credentials; git-ignored
+#   docker compose -f docker-compose.live.yml --env-file .env.live --profile paybroker up --build
+#   docker compose -f docker-compose.live.yml --env-file .env.live --profile all up        # every kind at once
+#
+# One service per kind (profiles: paybroker, llmgw, pagerlens, trustdesk, identity, citypulse, all). To edit a workload, change the
+# file under examples/live (it is mounted read-only), or point WORKLOADS_DIR at your own folder. Credentials come only from the
+# environment: they are passed through by name and never written into an image or a file.
+x-headless: &headless
+  build: .
+  image: cpsim-workloads
+  healthcheck: {disable: true}          # no web app in this container
+  restart: "no"
+  stop_grace_period: 10s                # `docker stop` sends SIGTERM; the CLI ends cleanly
+  volumes: ["${WORKLOADS_DIR:-./examples/live}:/workloads:ro"]
+  environment: &env
+    - PAYBROKER_URL
+    - PAYBROKER_SECRET_KEY
+    - PAYBROKER_PUBLISHABLE_KEY
+    - LLMGW_URL
+    - LLMGW_CLIENT_KEY
+    - PAGERLENS_URL
+    - PAGERLENS_TOKEN
+    - TRUSTDESK_URL
+    - TRUSTDESK_CLIENT_TOKEN
+    - CITYPULSE_URL
+    - CITYPULSE_INGEST_TOKEN
+    - IDENTITY_URL
+    - CPSIM_OIDC_ISSUER
+    - CPSIM_SERVICE_CLIENT_ID
+    - CPSIM_SERVICE_CLIENT_SECRET
+    - CPSIM_MAX_RATE
+    - CPSIM_ALLOW_HTTP_TARGETS
+
+services:
+  paybroker:
+    <<: *headless
+    profiles: [paybroker, all]
+    command: ["cpsim", "workloads", "run", "/workloads/paybroker.yaml"]
+  llmgw:
+    <<: *headless
+    profiles: [llmgw, all]
+    command: ["cpsim", "workloads", "run", "/workloads/llmgw.yaml"]
+  pagerlens:
+    <<: *headless
+    profiles: [pagerlens, all]
+    command: ["cpsim", "workloads", "run", "/workloads/pagerlens.yaml"]
+  trustdesk:
+    <<: *headless
+    profiles: [trustdesk, all]
+    command: ["cpsim", "workloads", "run", "/workloads/trustdesk.yaml"]
+  identity:
+    <<: *headless
+    profiles: [identity, all]
+    command: ["cpsim", "workloads", "run", "/workloads/identity.yaml"]
+  citypulse:
+    <<: *headless
+    profiles: [citypulse, all]
+    command: ["cpsim", "workloads", "run", "/workloads/citypulse.yaml"]

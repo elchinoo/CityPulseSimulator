@@ -65,8 +65,9 @@ def _num(value, what: str, lo: float, hi: float) -> float:
     return float(value)
 
 
-def check_target(url: str) -> str:
-    """CityPulse's address: https anywhere, plain http only for this machine; no credentials, no link-local."""
+def check_target(url: str, allow_http: bool = False) -> str:
+    """A target's address: https anywhere, plain http only for this machine (or anywhere with `allow_http`, an explicit opt-in for
+    local stand-ins); no credentials, no link-local."""
     if not url:
         return ""
     u = urlparse(url)
@@ -74,7 +75,7 @@ def check_target(url: str) -> str:
         raise SpecError("target_url must be an http(s) URL without credentials, query or fragment")
     host = u.hostname
     local = host in ("localhost", "127.0.0.1", "::1") or host.endswith(".localhost")
-    if u.scheme == "http" and not local:
+    if u.scheme == "http" and not local and not allow_http:
         raise SpecError("target_url must use https unless it points at this machine")
     try:
         ip = ipaddress.ip_address(host)

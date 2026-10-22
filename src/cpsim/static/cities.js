@@ -6,6 +6,14 @@ let catalog = null;
 let timer = null;
 const label = (p) => p.replace("_", " ");
 
+// The CityPulse "workload": every sensor sends a reading every `interval` seconds, on `direct` (no protocol sockets). A city's schedule is its
+// poll interval (how often the gateway polls the devices) and each group's frequency (seconds between readings of one sensor).
+const LIVE = (name, interval) => ({
+  name, seed: 7, poll_interval: interval,
+  groups: [["temperature", 12, "d01"], ["humidity", 6, "d01"], ["air_quality", 9, "d06"], ["noise", 6, "d08"], ["water_pressure", 6, "d04"],
+    ["smart_meter", 9, "d05"], ["traffic_light", 6, "d03"], ["rain", 6, "d07"]].map(([type, count, district]) => ({ type, count, district, protocol: "direct", frequency: interval, burst_pct: 5 })),
+});
+
 const DEMO = (name) => ({
   name, seed: 42, poll_interval: 2,
   groups: [
@@ -37,7 +45,9 @@ async function renderList(box) {
   const form = h("form", { class: "grid-inline", onsubmit: (e) => { e.preventDefault(); create({ name: name.value, groups: [] }); } },
     field("City name", name, "Lowercase letters, digits and dashes."),
     h("button", { class: "primary", type: "submit" }, "Create empty city"),
-    h("button", { class: "secondary", type: "button", onclick: () => name.value ? create(DEMO(name.value)) : (err.textContent = "Type a name first.") }, "Create a demo city"));
+    h("button", { class: "secondary", type: "button", onclick: () => name.value ? create(DEMO(name.value)) : (err.textContent = "Type a name first.") }, "Create a demo city"),
+    ...[2, 5].map((n) => h("button", { class: "secondary", type: "button", title: `A reading from each of 60 sensors every ${n} seconds, no protocol sockets`,
+      onclick: () => name.value ? create(LIVE(name.value, n)) : (err.textContent = "Type a name first.") }, `Live feed every ${n} s`)));
   const rows = cities.map((c) => h("tr", { class: "clickable", onclick: () => { location.hash = `#cities/${c.name}`; } },
     h("td", { class: "title" }, c.name), h("td", {}, c.sensors.toLocaleString()), h("td", {}, c.protocols.map(label).join(", ") || "none yet"),
     h("td", { class: "muted" }, c.target_url || "generate only"),

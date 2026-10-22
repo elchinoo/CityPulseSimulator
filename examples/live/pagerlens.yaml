@@ -1,0 +1,19 @@
+# Telemetry for PagerLens: a small fictional shop reports healthy baseline signals every tick.
+#   cpsim workloads run examples/live/pagerlens.yaml
+# PAGERLENS_URL and an ingest token in PAGERLENS_TOKEN (or a service token with scope pagerlens.ingest).
+# To open an incident set scenario to bad_deploy, error_spike, latency or silence (all aimed at target_service), or switch it live
+# in the web app (Workloads > this workload > Switch scenario).
+workloads:
+  - name: shop-telemetry
+    kind: pagerlens
+    target_url: ${PAGERLENS_URL}
+    token_env: PAGERLENS_TOKEN
+    params:
+      prefix: sim-                # the fictional services are sim-web, sim-checkout, sim-catalog, sim-payments, sim-db
+      scenario: healthy
+      target_service: checkout
+      alert: true                 # raise an alert for a failure scenario, once, after alert_after ticks
+      alert_after: 3
+    schedule:
+      interval: 5                 # a tick every 5 seconds: one metrics call and one logs call per service
+      batch: 3                    # log events per service per tick

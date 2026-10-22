@@ -1,6 +1,7 @@
-"""Persistence for cities and companies in Postgres (the AgentPG way): Postgres is required (DATABASE_URL).
+"""Persistence for cities, companies and workloads in Postgres (the AgentPG way): Postgres is required (DATABASE_URL) for the server;
+the headless commands use `MemoryStore` and need none.
 
-Neither holds a secret: ingest and client tokens live in environment variables that a city or company only names. The admin
+None holds a secret: ingest, client and API keys live in environment variables that a city or company only names. The admin
 password hash, sessions and API tokens belong to the kit's auth tables (see `migrate.py`).
 """
 import json
@@ -37,6 +38,19 @@ class PgStore:
         with self._conn() as c:
             c.execute("DELETE FROM cpsim_company WHERE name=%s", (name,))
 
+    def workloads(self) -> dict[str, dict]:
+        with self._conn() as c:
+            return {r["name"]: r["spec"] for r in c.execute("SELECT name, spec FROM cpsim_workload ORDER BY name")}
+
+    def save_workload(self, name: str, spec: dict) -> None:
+        with self._conn() as c:
+            c.execute("INSERT INTO cpsim_workload VALUES (%s,%s) ON CONFLICT (name) DO UPDATE SET spec=EXCLUDED.spec",
+                      (name, json.dumps(spec)))
+
+    def delete_workload(self, name: str) -> None:
+        with self._conn() as c:
+            c.execute("DELETE FROM cpsim_workload WHERE name=%s", (name,))
+
     def healthy(self) -> bool:
         try:
             with db.connect(retries=1) as c:
@@ -44,6 +58,45 @@ class PgStore:
             return True
         except Exception:  # noqa: BLE001
             return False
+
+
+class MemoryStore:
+    """The same interface in memory, for the headless commands (`cpsim run`, `hr-run`, `workloads run`): no Postgres needed."""
+
+    def __init__(self):
+        self._cities: dict[str, dict] = {}
+        self._companies: dict[str, dict] = {}
+        self._workloads: dict[str, dict] = {}
+
+    def cities(self) -> dict[str, dict]:
+        return dict(self._cities)
+
+    def save_city(self, name: str, spec: dict) -> None:
+        self._cities[name] = spec
+
+    def delete_city(self, name: str) -> None:
+        self._cities.pop(name, None)
+
+    def companies(self) -> dict[str, dict]:
+        return dict(self._companies)
+
+    def save_company(self, name: str, spec: dict) -> None:
+        self._companies[name] = spec
+
+    def delete_company(self, name: str) -> None:
+        self._companies.pop(name, None)
+
+    def workloads(self) -> dict[str, dict]:
+        return dict(self._workloads)
+
+    def save_workload(self, name: str, spec: dict) -> None:
+        self._workloads[name] = spec
+
+    def delete_workload(self, name: str) -> None:
+        self._workloads.pop(name, None)
+
+    def healthy(self) -> bool:
+        return True
 
 
 def open_store() -> PgStore:

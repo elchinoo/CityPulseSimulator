@@ -1,0 +1,13 @@
+# A load and health probe for the identity provider (modest on purpose: every token call is a real, audited service sign-in).
+#   cpsim workloads run examples/live/identity.yaml
+# IDENTITY_URL (the provider's issuer URL); the simulator's own service client: CPSIM_SERVICE_CLIENT_ID and CPSIM_SERVICE_CLIENT_SECRET.
+workloads:
+  - name: identity-probe
+    kind: identity
+    target_url: ${IDENTITY_URL}
+    params:
+      mix: {token: 60, discovery: 20, jwks: 20}
+      # scope: pagerlens.ingest
+    schedule:
+      interval: 5
+      batch: 2

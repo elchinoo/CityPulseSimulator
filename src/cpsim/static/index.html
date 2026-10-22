@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <title>CityPulse Simulator</title>
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="description" content="Build cities of simulated sensors (Modbus TCP, EtherNet/IP, EtherCAT, PROFINET, PROFIBUS) for CityPulse, and companies of simulated employees whose requests go to TrustDesk.">
+<meta name="description" content="Build cities of simulated sensors (Modbus TCP, EtherNet/IP, EtherCAT, PROFINET, PROFIBUS) for CityPulse, companies of simulated employees whose requests go to TrustDesk, and scheduled workloads for PayBroker, the LLM gateway, PagerLens and the identity provider.">
 <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
 <link rel="stylesheet" href="/kit/base.css">
 <link rel="stylesheet" href="/static/app.css">
@@ -15,6 +15,7 @@
   <nav id="nav" class="tabs" hidden>
     <a href="#cities" data-tab="cities">Cities</a>
     <a href="#companies" data-tab="companies">Companies</a>
+    <a href="#workloads" data-tab="workloads">Workloads</a>
     <a href="#protocols" data-tab="protocols">Protocols</a>
     <a href="#settings" data-tab="settings">Settings</a>
   </nav>
@@ -24,6 +25,7 @@
   <section id="auth-card" class="card narrow" hidden></section>
   <section id="view-cities" hidden></section>
   <section id="view-companies" hidden></section>
+  <section id="view-workloads" hidden></section>
   <section id="view-protocols" hidden></section>
   <section id="view-settings" hidden></section>
 </main>

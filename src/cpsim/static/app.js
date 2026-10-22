@@ -2,12 +2,13 @@ import { api } from "/kit/api.js";
 import { initCities, stopCities } from "/static/cities.js";
 import { initCompanies, stopCompanies } from "/static/companies.js";
 import { initProtocols } from "/static/protocols.js";
+import { initWorkloads, stopWorkloads } from "/static/workloads.js";
 import { can, refreshSession, renderLogin, renderSetup, state } from "/kit/session.js";
 import { initSettings } from "/static/settings.js";
 import { $, h } from "/kit/ui.js";
 
-const TABS = ["cities", "companies", "protocols", "settings"];
-const INIT = { cities: initCities, companies: initCompanies, protocols: initProtocols, settings: initSettings };
+const TABS = ["cities", "companies", "workloads", "protocols", "settings"];
+const INIT = { cities: initCities, companies: initCompanies, workloads: initWorkloads, protocols: initProtocols, settings: initSettings };
 const SECTIONS = ["auth-card", "nav", "signout", ...TABS.map((t) => "view-" + t)];
 
 function hideAll() { for (const id of SECTIONS) $(id).hidden = true; }
@@ -27,6 +28,7 @@ async function boot(notice = "") {
   hideAll();
   stopCities();
   stopCompanies();
+  stopWorkloads();
   let s;
   try { s = await refreshSession(); } catch (err) { showUnavailable(err); return; }
   if (s.state === "setup_required") renderSetup(() => boot(), "CityPulse Simulator");
@@ -35,7 +37,7 @@ async function boot(notice = "") {
 }
 
 // What each tab needs (the server enforces it; this only hides what would be refused). Protocols is plain documentation.
-const NEEDS = { cities: "sim:read", companies: "sim:read", protocols: null, settings: "settings:manage" };
+const NEEDS = { cities: "sim:read", companies: "sim:read", workloads: "sim:read", protocols: null, settings: "settings:manage" };
 const allowed = (t) => !NEEDS[t] || can(NEEDS[t]);
 
 function showApp() {
@@ -53,9 +55,10 @@ function route() {
   const tab = open.includes(name) ? name : (open[0] || "protocols");
   if (tab !== "cities") stopCities();
   if (tab !== "companies") stopCompanies();
+  if (tab !== "workloads") stopWorkloads();
   for (const t of TABS) $("view-" + t).hidden = t !== tab;
   for (const a of document.querySelectorAll("#nav a")) a.classList.toggle("active", a.dataset.tab === tab);
-  INIT[tab](tab === "cities" || tab === "companies" ? arg : undefined);
+  INIT[tab](tab === "cities" || tab === "companies" || tab === "workloads" ? arg : undefined);
 }
 
 $("signout").addEventListener("click", async () => {

@@ -1,0 +1,21 @@
+# Payments for PayBroker, headless:  cpsim workloads run examples/live/paybroker.yaml
+# The URL comes from the environment (PAYBROKER_URL); the merchant SECRET key from PAYBROKER_SECRET_KEY. Keys are never put in a file.
+# Declines and fraud rejections are expected outcomes, counted by class.
+workloads:
+  - name: shop-payments
+    kind: paybroker
+    target_url: ${PAYBROKER_URL}
+    token_env: PAYBROKER_SECRET_KEY
+    # publishable_env: PAYBROKER_PUBLISHABLE_KEY    # optional: tokenize cards with a publishable key, like a browser would
+    params:
+      mix: {regular: 74, decline: 8, three_ds: 5, connector_failure: 5, card_testing: 5, account_takeover: 3}   # percentages
+      capture_pct: 50          # authorize now, capture half of them on a later tick
+      refund_pct: 10           # refund a tenth of the captured payments
+      complete_3ds_pct: 80     # complete most 3-D Secure challenges
+      # customers: 60          # customer pool (one unique test card each); empty: sized to the rate
+    schedule:
+      interval: 2              # a tick every 2 seconds ...
+      batch: 3                 # ... of 3 payments
+      jitter_pct: 10
+      concurrency: 4
+      # duration: 600          # stop after 10 minutes (or `total: 1000` items, or `ticks: 300`); empty: forever

@@ -8,6 +8,7 @@ RUN pip install --no-cache-dir "agentpg-kit @ ${KIT_URL}"
 
 COPY pyproject.toml README.md ./
 COPY src ./src
+COPY examples ./examples
 RUN pip install --no-cache-dir .
 
 # Bind to all interfaces so a reverse proxy / sandbox can reach the web app.
@@ -24,6 +25,9 @@ USER app
 
 EXPOSE 8000
 
+# The web app answers /healthz. A headless container (`cpsim workloads run ...`, see docker-compose.live.yml) runs no web app: turn this off there.
 HEALTHCHECK --start-period=20s CMD python -c "import urllib.request,os;urllib.request.urlopen('http://localhost:'+os.environ['PORT']+'/healthz')"
 
+# Default: the web app and API (needs DATABASE_URL). The same image runs headless, with no Postgres, by overriding the command:
+#   docker run --rm --env-file .env.live ghcr.io/<owner>/citypulsesimulator cpsim workloads run /app/examples/live/paybroker.yaml
 CMD ["cpsim", "serve"]

@@ -58,6 +58,30 @@ class SimCollector:
         yield reqs
         yield emps
 
+        # Workloads: the names are operator-defined and few; outcome classes are a small fixed set per kind.
+        wl = runtime.workload_snapshots() if runtime else []
+        running = GaugeMetricFamily("cpsim_workloads_running", "Workloads running")
+        running.add_metric([], sum(1 for s in wl if s["state"] == "running"))
+        yield running
+        ticks = CounterMetricFamily("cpsim_workload_ticks", "Ticks of a workload that started a batch", labels=["workload", "kind"])
+        skipped = CounterMetricFamily("cpsim_workload_skipped_ticks", "Ticks skipped (previous batch still running, or backing off)",
+                                      labels=["workload", "kind"])
+        items = CounterMetricFamily("cpsim_workload_items", "Items sent by a workload, by outcome class", labels=["workload", "kind", "outcome"])
+        latency = GaugeMetricFamily("cpsim_workload_latency_seconds", "Request latency of a workload over its last 2000 calls",
+                                    labels=["workload", "kind", "quantile"])
+        for s in wl:
+            ticks.add_metric([s["name"], s["kind"]], s["ticks"])
+            skipped.add_metric([s["name"], s["kind"]], s["skipped"])
+            for outcome, n in s["outcomes"].items():
+                items.add_metric([s["name"], s["kind"], outcome], n)
+            for q, key in (("0.5", "latency_p50"), ("0.95", "latency_p95")):
+                if s[key] is not None:
+                    latency.add_metric([s["name"], s["kind"], q], s[key])
+        yield ticks
+        yield skipped
+        yield items
+        yield latency
+
 
 REGISTRY.register(SimCollector())
 

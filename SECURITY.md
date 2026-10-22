@@ -29,7 +29,7 @@ Please **do not open a public issue** for security problems. Use GitHub's privat
 - Failed credentials are rate limited (10 per minute per client address, in memory, per process).
 
 **Secrets are never stored in a city.** A city holds only the *name* of the environment variable that carries its CityPulse
-ingest token (validated as an upper-case variable name, so pasting a token there is refused). Cities, companies and the credentials
+ingest token (validated as an upper-case variable name, so pasting a token there is refused). Cities, companies, workloads and the credentials
 above (password hash, session and token hashes) are the only things persisted, in Postgres, which is required. The file store of the
 first release is retired (`cpsim import-files` loads it once).
 
@@ -53,6 +53,15 @@ DENY`, `nosniff`, `no-referrer`; the interface builds DOM nodes with `textConten
 cannot point at a database URL or an API key). The TrustDesk client token is sent only to the company's URL (https, or http for this
 machine; no credentials, no link-local addresses; redirects are never followed). Generated people are invented and use `example.com`
 addresses. A run is bounded (20,000 requests, 2,000 employees, 200 requests per second, 16 connections).
+
+**Workloads.** A workload stores only the NAME of the environment variable that carries its credential (validated: it must contain `TOKEN`, `KEY` or `SECRET`, and may not
+be one of the simulator's own `CPSIM_*` variables or a database variable), so pasting a key there is refused. The credential is sent only to the workload's URL (https, or http for
+this machine; plain http to other hosts only with the explicit `CPSIM_ALLOW_HTTP_TARGETS`; no credentials in the URL, no link-local addresses; redirects are never followed) and is never logged, printed,
+stored or put in a status, error or metric. Targets are chosen by the operator, so there is no further SSRF restriction beyond a city's; the headless command prints one line when a target is
+not on this machine. Bounds: batch at most 500, interval at least 0.2 s, `CPSIM_MAX_RATE` for one workload and for all together, the identity probe at most 20 calls per tick and one tick a second. The
+identity probe sends the service client secret only to a token endpoint on the provider's own origin. Every generated identity is fictional (`example.com`/`example.org`, documentation IP ranges, test cards in
+the reserved `999999` range). Residual risk: someone with the *operator* role can make the simulator send any non-denylisted environment secret of its process to a URL they choose; give the sandbox only
+the credentials the workloads need, narrow and revocable. Running (`sim:run`), editing (`sim:edit`) and seeing (`sim:read`) workloads follow the same roles as cities and companies.
 
 **Known limits.** Rate limiting is per process. A leaked ingest token lets an attacker push readings to CityPulse
 (bounded by its validation) until revoked; use one token per simulator.

@@ -5,6 +5,7 @@ __pycache__/
 .github/
 .claude/
 .env
+.env.*
 .pytest_cache/
 .ruff_cache/
 tests/
