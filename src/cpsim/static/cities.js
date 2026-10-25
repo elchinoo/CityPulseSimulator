@@ -1,7 +1,7 @@
 import { api } from "/kit/api.js";
 import { guard } from "/static/perm.js";
 import { fleetChoice, targetText, withFleet } from "/static/fleet.js";
-import { $, field, fill, h, toast } from "/kit/ui.js";
+import { $, confirmDialog, field, fill, h, toast } from "/kit/ui.js";
 
 let catalog = null;
 let timer = null;
@@ -205,7 +205,7 @@ async function renderCity(box, name) {
       : h("div", { class: "card" }, h("p", { class: "empty" }, "No sensors yet. Add a group below.")),
     h("h2", { class: "section-title" }, "Add a sensor group"), h("div", { class: "card" }, addGroup),
     h("h2", { class: "section-title" }, "City settings"), h("div", { class: "card" }, settings),
-    h("div", { class: "btns" }, h("button", { class: "danger", type: "button", onclick: async () => { if (!confirm(`Delete ${name}?`)) return; await api(`/api/cities/${name}`, { method: "DELETE" }); location.hash = "#cities"; } }, "Delete city")));
+    h("div", { class: "btns" }, h("button", { class: "danger", type: "button", onclick: async () => { if (!(await confirmDialog(`Delete ${name}?`, { title: "Delete city", confirmLabel: "Delete city", danger: true, typeToConfirm: name }))) return; await api(`/api/cities/${name}`, { method: "DELETE" }); location.hash = "#cities"; } }, "Delete city")));
   guard(box);
   await draw();
   clearInterval(timer);

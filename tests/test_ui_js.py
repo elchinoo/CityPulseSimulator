@@ -1,4 +1,5 @@
 """The browser code without a browser: every module parses, and the fake-DOM checks under tests/ui pass (needs node and the sibling kit)."""
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -17,7 +18,13 @@ def test_every_ui_module_parses(js):
 
 
 @pytest.mark.skipif(not (ROOT.parent / "agentpg-kit/src/apgkit/static").is_dir(), reason="the sibling agentpg-kit checkout is not present")
-@pytest.mark.parametrize("script", ["cities_generate.mjs", "workloads_typing.mjs", "settings_typing.mjs", "fleet_choice.mjs", "resume_typing.mjs"])
+@pytest.mark.parametrize("script", ["cities_generate.mjs", "workloads_typing.mjs", "settings_typing.mjs", "fleet_choice.mjs", "resume_typing.mjs", "delete_dialogs.mjs"])
 def test_fake_dom_checks(script):
     r = subprocess.run([NODE, str(ROOT / "tests/ui" / script)], capture_output=True, text=True, timeout=60)
     assert r.returncode == 0 and r.stdout.startswith("ok"), r.stdout + r.stderr
+
+
+@pytest.mark.parametrize("js", sorted((ROOT / "src/cpsim/static").glob("*.js")), ids=lambda p: p.name)
+def test_no_native_dialogs(js):
+    """window.confirm/alert/prompt cannot be styled and freeze browser tests: use the kit's confirmDialog/promptDialog."""
+    assert not re.search(r"(?<![\w.])(?:window\.)?(?:confirm|alert|prompt)\s*\(", js.read_text())

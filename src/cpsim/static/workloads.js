@@ -1,7 +1,7 @@
 import { api } from "/kit/api.js";
 import { guard } from "/static/perm.js";
 import { fleetChoice, targetText, withFleet } from "/static/fleet.js";
-import { $, field, fill, h, toast } from "/kit/ui.js";
+import { $, confirmDialog, field, fill, h, toast } from "/kit/ui.js";
 
 let catalog = null;
 let timer = null;
@@ -213,7 +213,7 @@ async function renderWorkload(box, name) {
       running && w.will_resume ? h("span", { class: "muted", id: "wl-resume" }, "Will resume after a restart (Stop to keep it stopped).") : null),
     err, box2,
     h("h2", { class: "section-title" }, "Settings"), h("div", { class: "card" }, form),
-    h("div", { class: "btns" }, h("button", { class: "danger", type: "button", onclick: async () => { if (!confirm(`Delete ${name}?`)) return; await api(`/api/workloads/${name}`, { method: "DELETE" }); location.hash = "#workloads"; } }, "Delete workload")));
+    h("div", { class: "btns" }, h("button", { class: "danger", type: "button", onclick: async () => { if (!(await confirmDialog(`Delete ${name}?`, { title: "Delete workload", confirmLabel: "Delete workload", danger: true, typeToConfirm: name }))) return; await api(`/api/workloads/${name}`, { method: "DELETE" }); location.hash = "#workloads"; } }, "Delete workload")));
   guard(box);
   await draw();
   clearInterval(timer);

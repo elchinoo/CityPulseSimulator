@@ -3,7 +3,7 @@ import { initCities, stopCities } from "/static/cities.js";
 import { initCompanies, stopCompanies } from "/static/companies.js";
 import { initProtocols } from "/static/protocols.js";
 import { initWorkloads, stopWorkloads } from "/static/workloads.js";
-import { can, refreshSession, renderLogin, renderSetup, state } from "/kit/session.js";
+import { bootSession, can, renderLogin, renderSetup, state } from "/kit/session.js";
 import { initSettings } from "/static/settings.js";
 import { $, h } from "/kit/ui.js";
 
@@ -13,27 +13,23 @@ const SECTIONS = ["auth-card", "nav", "signout", ...TABS.map((t) => "view-" + t)
 
 function hideAll() { for (const id of SECTIONS) $(id).hidden = true; }
 
-function showUnavailable(err) {
-  hideAll();
-  $("auth-card").replaceChildren(
-    h("img", { class: "hero-logo", src: "/static/logo.svg", alt: "", width: "72", height: "72" }),
-    h("h1", {}, "CityPulse Simulator can't be reached"),
-    h("p", { class: "muted" }, err.message),
-    h("p", { class: "hint" }, "If this runs on a platform that pauses idle apps, resume it first (for AgentPG: agentpg sandbox resume <sandbox-id>), then retry."),
-    h("button", { class: "primary", type: "button", onclick: () => boot() }, "Retry"));
-  $("auth-card").hidden = false;
-}
+const PAUSED_HINT = "If this runs on a platform that pauses idle apps, resume it first (for AgentPG: agentpg sandbox resume <sandbox-id>), then retry.";
 
 async function boot(notice = "") {
   hideAll();
   stopCities();
   stopCompanies();
   stopWorkloads();
-  let s;
-  try { s = await refreshSession(); } catch (err) { showUnavailable(err); return; }
-  if (s.state === "setup_required") renderSetup(() => boot(), "CityPulse Simulator");
-  else if (s.state === "logged_out") renderLogin(() => boot(), notice, "CityPulse Simulator");
-  else showApp();
+  const card = $("auth-card");
+  card.hidden = false;
+  // onReady also runs after a successful "Try again", so a retry lands in the app instead of an empty card.
+  const onReady = (s) => {
+    if (s.state === "setup_required") renderSetup(() => boot(), "CityPulse Simulator");
+    else if (s.state === "logged_out") renderLogin(() => boot(), notice, "CityPulse Simulator");
+    else showApp();
+  };
+  const s = await bootSession(card, { text: "Connecting to CityPulse Simulator\u2026", onReady });   // Loading while single sign-on settles; error + Try again if it cannot be reached
+  if (!s) card.append(h("p", { class: "hint" }, PAUSED_HINT));
 }
 
 // What each tab needs (the server enforces it; this only hides what would be refused). Protocols is plain documentation.

@@ -1,5 +1,5 @@
 import { api } from "/kit/api.js";
-import { $, copy, field, fill, fmtDate, h, toast } from "/kit/ui.js";
+import { $, confirmDialog, copy, field, fill, fmtDate, h, toast } from "/kit/ui.js";
 
 function tokensCard() {
   const reveal = h("div", { hidden: true });
@@ -16,7 +16,7 @@ function tokensCard() {
         h("td", { class: "title" }, t.name), h("td", {}, h("code", {}, `${t.prefix}…`)), h("td", {}, t.scope),
         h("td", {}, fmtDate(t.created_at)), h("td", {}, fmtDate(t.last_used_at)),
         h("td", { class: "actions" }, t.revoked_at ? h("span", { class: "muted" }, "revoked") : h("button", { class: "danger small", type: "button", onclick: async () => {
-          if (!confirm(`Revoke "${t.name}"? Clients using it stop working immediately.`)) return;
+          if (!(await confirmDialog(`Revoke "${t.name}"? Clients using it stop working immediately.`, { title: "Revoke token", confirmLabel: "Revoke", danger: true }))) return;
           try { await api(`/api/tokens/${t.id}`, { method: "DELETE" }); toast("Token revoked"); renderTable(); } catch (err) { toast(err.message, true); }
         } }, "Revoke"))))))) : h("p", { class: "hint" }, "No tokens yet."));
   }
@@ -67,7 +67,7 @@ function credentialsCard() {
           h("td", { class: "muted" }, c.used_by.join(", ") || "-"), h("td", {}, input),
           h("td", { class: "actions" }, h("button", { class: "secondary small", type: "button", disabled: !d.unlocked, onclick: save }, "Save"),
             c.saved ? h("button", { class: "danger small", type: "button", onclick: async () => {
-              if (!confirm(`Delete the saved ${c.name}? Workloads that use it stop working.`)) return;
+              if (!(await confirmDialog(`Delete the saved ${c.name}? Workloads that use it stop working.`, { title: "Delete saved credential", confirmLabel: "Delete", danger: true }))) return;
               try { await api(`/api/credentials/${encodeURIComponent(c.name)}`, { method: "DELETE" }); toast("Deleted"); render(); } catch (err) { toast(err.message, true); }
             } }, "Delete") : null));
       })))));

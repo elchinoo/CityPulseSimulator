@@ -1,7 +1,7 @@
 import { api } from "/kit/api.js";
 import { guard } from "/static/perm.js";
 import { fleetChoice, targetText, withFleet } from "/static/fleet.js";
-import { $, field, fill, h, toast } from "/kit/ui.js";
+import { $, confirmDialog, field, fill, h, toast } from "/kit/ui.js";
 
 let catalog = null;
 let timer = null;
@@ -187,7 +187,7 @@ async function renderCompany(box, name) {
       + (c.schedule_run.last_error ? `, last error: ${c.schedule_run.last_error}` : "") + (c.schedule_run.fatal ? `, stopped: ${c.schedule_run.fatal}` : "")) : null,
     err, live, preview,
     h("h2", { class: "section-title" }, "What to send"), h("div", { class: "card" }, form),
-    h("div", { class: "btns" }, h("button", { class: "danger", type: "button", onclick: async () => { if (!confirm(`Delete ${name}?`)) return; await api(`/api/companies/${name}`, { method: "DELETE" }); location.hash = "#companies"; } }, "Delete company")));
+    h("div", { class: "btns" }, h("button", { class: "danger", type: "button", onclick: async () => { if (!(await confirmDialog(`Delete ${name}?`, { title: "Delete company", confirmLabel: "Delete company", danger: true, typeToConfirm: name }))) return; await api(`/api/companies/${name}`, { method: "DELETE" }); location.hash = "#companies"; } }, "Delete company")));
   guard(box);
   await draw();
   clearInterval(timer);
