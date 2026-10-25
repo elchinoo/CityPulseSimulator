@@ -7,7 +7,7 @@ from apgkit.auth import Federation, RelyingParty, TokenVerifier
 from fastapi.testclient import TestClient
 from test_federation_db import AUD, ISS, Provider, access
 
-from cpsim import api, core
+from cpsim import api, core, hr_engine
 
 CITY = {"groups": [{"type": "temperature", "count": 2, "protocol": "direct", "frequency": 5}]}
 WL = {"kind": "paybroker", "schedule": {"interval": 0.2, "batch": 1}}
@@ -51,7 +51,7 @@ def until(cond, seconds=8):
     raise AssertionError("timed out")
 
 
-def test_a_start_is_remembered_a_stop_by_a_person_is_too(client):
+def test_a_start_is_remembered_a_stop_by_a_person_is_too(client, monkeypatch):
     admin = who("admin")
     client.put("/api/cities/metro", headers=admin, json=CITY)
     assert client.get("/api/cities/metro", headers=admin).json()["will_resume"] is False
@@ -74,7 +74,12 @@ def test_a_start_is_remembered_a_stop_by_a_person_is_too(client):
     assert got["schedule_will_resume"] is True and got["will_resume"] is False
     client.post("/api/companies/acme/schedule/stop", headers=admin)
     assert api.store.desired("schedule") == set()
-    client.post("/api/companies/acme/run", headers=admin)
+    async def stays_running(self):                  # a real run with no target ends at once and clears its own flag: keep it going until stopped
+        await self._stop.wait()
+        self.state = "stopped"
+    monkeypatch.setattr(hr_engine.HrRun, "_main", stays_running)
+    started = client.post("/api/companies/acme/run", headers=admin)
+    assert started.status_code == 200, started.text
     assert api.store.desired("company") == {"acme"}
     client.post("/api/companies/acme/stop", headers=admin)
     assert api.store.desired("company") == set()
