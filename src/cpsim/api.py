@@ -34,7 +34,7 @@ from .model import (
     parse_city,
 )
 from .protocols.image import MAX_CHANNELS
-from .runtime import Runtime
+from .runtime import RESUME_SETTING, Runtime, resume_default, resume_stagger
 from .schedule import MAX_BATCH, MAX_INTERVAL, MIN_INTERVAL, max_rate
 from .store import open_store
 from .wl_model import allow_http_targets, parse_workload
@@ -68,6 +68,7 @@ async def lifespan(_: FastAPI):
         await runtime.autostart()
     except Exception as exc:  # noqa: BLE001 - e.g. the database is asleep; the UI still comes up
         print(f"cpsim: startup: {str(exc).splitlines()[0][:160]}", file=sys.stderr, flush=True)
+    tasks.append(asyncio.create_task(_resume()))         # after the start-on-boot items, one at a time, without holding the app back
     rep = reporter.maybe_start(runtime)
     if rep:
         tasks.append(asyncio.create_task(rep.run()))
@@ -77,6 +78,15 @@ async def lifespan(_: FastAPI):
         for t in tasks:
             t.cancel()
         await runtime.stop_all()
+
+
+async def _resume() -> None:
+    try:
+        await runtime.resume()
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:  # noqa: BLE001 - e.g. the database is asleep
+        print(f"cpsim: resume: {str(exc).splitlines()[0][:160]}", file=sys.stderr, flush=True)
 
 
 # --- authentication ---------------------------------------------------------------------------------------
@@ -342,6 +352,29 @@ def fleet_status():
     return {"vars": fleet.status()}
 
 
+class RunSettingsBody(BaseModel):
+    resume_on_start: bool
+
+
+def _run_settings() -> dict:
+    return {"resume_on_start": runtime.resume_enabled(), "default": resume_default(), "stagger_seconds": resume_stagger()}
+
+
+@app.get("/api/run-settings", dependencies=[Depends(require("settings:manage"))])
+def get_run_settings():
+    """Whether the app starts again after a restart what was running before it (the stagger comes from CPSIM_RESUME_STAGGER_SECONDS)."""
+    return _run_settings()
+
+
+@app.put("/api/run-settings", dependencies=[Depends(require("settings:manage"))])
+def put_run_settings(body: RunSettingsBody):
+    try:
+        store.save_setting(RESUME_SETTING, "true" if body.resume_on_start else "false")
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(503, "the state store is unavailable") from exc
+    return _run_settings()
+
+
 @app.get("/api/credentials", dependencies=[Depends(require("settings:manage"))])
 def list_credentials():
     """Names only, with where each value comes from. A value is never returned."""
@@ -390,10 +423,10 @@ def _bad(exc: Exception) -> HTTPException:
     return HTTPException(422, str(exc))
 
 
-def _summary(name: str, city) -> dict:
+def _summary(name: str, city, wanted: frozenset | set = frozenset()) -> dict:
     runner = runtime.runners.get(name)
     return {"name": name, "target_url": city.target_url, "target": fleet.describe(city.target_url), "sensors": city.sensor_count(), "groups": len(city.groups),
-            "running": runner is not None, "autostart": city.autostart,
+            "running": runner is not None, "autostart": city.autostart, "will_resume": name in wanted and runtime.resume_enabled(),
             "protocols": sorted({g.protocol for g in city.groups}),
             "stats": runner.snapshot() if runner else None}
 
@@ -401,7 +434,8 @@ def _summary(name: str, city) -> dict:
 @app.get("/api/cities", dependencies=[Depends(require("sim:read"))])
 def list_cities():
     try:
-        return [_summary(n, c) for n, c in runtime.specs().items()]
+        wanted = runtime.wanted("city")
+        return [_summary(n, c, wanted) for n, c in runtime.specs().items()]
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(503, "the state store is unavailable") from exc
 
@@ -441,7 +475,8 @@ def get_city(name: str):
     city = runtime.get(name)
     if city is None:
         raise HTTPException(404, "no such city")
-    return {**city.to_dict(), "target": fleet.describe(city.target_url), "running": name in runtime.runners}
+    return {**city.to_dict(), "target": fleet.describe(city.target_url), "running": name in runtime.runners,
+            "will_resume": name in runtime.wanted("city") and runtime.resume_enabled()}
 
 
 @app.put("/api/cities/{name}", dependencies=[Depends(require("sim:edit"))])
@@ -449,7 +484,7 @@ def put_city(name: str, spec: dict):
     """Create or replace a city. A running city must be stopped first."""
     if name in runtime.runners:
         raise HTTPException(409, "stop the city before changing it")
-    spec = {k: v for k, v in spec.items() if k != "target"}       # read-only echo of a GET (reference and resolved address)
+    spec = {k: v for k, v in spec.items() if k not in ("target", "will_resume")}       # read-only echo of a GET (reference and resolved address, resume note)
     try:
         city = parse_city({**spec, "name": name})
     except SpecError as exc:
@@ -480,7 +515,9 @@ async def start_city(name: str):
 
 @app.post("/api/cities/{name}/stop", dependencies=[Depends(require("sim:run"))])
 async def stop_city(name: str):
-    return {"stopped": await runtime.stop(name)}
+    stopped = await runtime.stop(name)
+    runtime.want("city", name, False)             # a person stopped it: it stays stopped after a restart
+    return {"stopped": stopped}
 
 
 class BoostBody(BaseModel):
@@ -559,7 +596,9 @@ def get_company(name: str):
         raise HTTPException(404, "no such company")
     run = runtime.hr_runs.get(name)
     sched = runtime.company_schedules.get(name)
-    return {**c.to_dict(), "target": fleet.describe(c.target_url), "state": run.state if run else "idle", "schedule_run": sched.snapshot() if sched else None}
+    return {**c.to_dict(), "target": fleet.describe(c.target_url), "state": run.state if run else "idle", "schedule_run": sched.snapshot() if sched else None,
+            "will_resume": name in runtime.wanted("company") and runtime.resume_enabled(),
+            "schedule_will_resume": name in runtime.wanted("schedule") and runtime.resume_enabled()}
 
 
 @app.put("/api/companies/{name}", dependencies=[Depends(require("sim:edit"))])
@@ -568,7 +607,7 @@ def put_company(name: str, spec: dict):
     sched = runtime.company_schedules.get(name)
     if (run and run.running) or (sched and sched.running):
         raise HTTPException(409, "stop the company (and its schedule) before changing it")
-    spec = {k: v for k, v in spec.items() if k != "target"}
+    spec = {k: v for k, v in spec.items() if k not in ("target", "will_resume", "schedule_will_resume")}
     try:
         c = parse_company({**spec, "name": name})
     except SpecError as exc:
@@ -626,7 +665,9 @@ async def run_company(name: str):
 
 @app.post("/api/companies/{name}/stop", dependencies=[Depends(require("sim:run"))])
 async def stop_company(name: str):
-    return {"stopped": await runtime.stop_hr(name)}
+    stopped = await runtime.stop_hr(name)
+    runtime.want("company", name, False)
+    return {"stopped": stopped}
 
 
 @app.get("/api/companies/{name}/status", dependencies=[Depends(require("sim:read"))])
@@ -666,7 +707,9 @@ async def start_company_schedule(name: str):
 
 @app.post("/api/companies/{name}/schedule/stop", dependencies=[Depends(require("sim:run"))])
 async def stop_company_schedule(name: str):
-    return {"stopped": await runtime.stop_company_schedule(name)}
+    stopped = await runtime.stop_company_schedule(name)
+    runtime.want("schedule", name, False)
+    return {"stopped": stopped}
 
 
 # --- workloads: scheduled pushes to the other apps of the ecosystem ---------------------------------------------------------
@@ -702,7 +745,8 @@ def get_workload(name: str):
     if wl is None:
         raise HTTPException(404, "no such workload")
     runner = runtime.wl_runners.get(name)
-    return {**wl.to_dict(), "target": fleet.describe(wl.target_url, allow_http_targets()), "state": runner.state if runner else "idle"}
+    return {**wl.to_dict(), "target": fleet.describe(wl.target_url, allow_http_targets()), "state": runner.state if runner else "idle",
+            "will_resume": name in runtime.wanted("workload") and runtime.resume_enabled()}
 
 
 @app.put("/api/workloads/{name}", dependencies=[Depends(require("sim:edit"))])
@@ -711,7 +755,7 @@ def put_workload(name: str, spec: dict):
     runner = runtime.wl_runners.get(name)
     if runner and runner.running:
         raise HTTPException(409, "stop the workload before changing it")
-    spec = {k: v for k, v in spec.items() if k != "target"}
+    spec = {k: v for k, v in spec.items() if k not in ("target", "will_resume", "schedule_will_resume")}
     try:
         wl = parse_workload({**spec, "name": name})
     except SpecError as exc:
@@ -751,7 +795,9 @@ async def start_workload(name: str):
 
 @app.post("/api/workloads/{name}/stop", dependencies=[Depends(require("sim:run"))])
 async def stop_workload(name: str):
-    return {"stopped": await runtime.stop_workload(name)}
+    stopped = await runtime.stop_workload(name)
+    runtime.want("workload", name, False)
+    return {"stopped": stopped}
 
 
 @app.post("/api/workloads/{name}/run-once", dependencies=[Depends(require("sim:run"))])

@@ -1,4 +1,7 @@
 """Owns the running cities. Everything runs in the app's event loop."""
+import asyncio
+import math
+import os
 from dataclasses import replace
 
 from . import fleet, kinds
@@ -12,6 +15,22 @@ from .tokens import CITYPULSE_INGEST, TRUSTDESK_CLIENT, outbound_token
 from .wl_model import Workload, allow_http_targets, parse_workload
 from .wl_runner import WorkloadRunner
 
+RESUME_SETTING = "resume_on_start"        # the runtime switch (Settings page); CPSIM_RESUME_ON_START is its default until someone sets it
+DEFAULT_STAGGER = 1.0
+
+
+def resume_default() -> bool:
+    return os.environ.get("CPSIM_RESUME_ON_START", "").strip().lower() not in ("0", "false", "no", "off")
+
+
+def resume_stagger() -> float:
+    """Seconds between two resumed items (CPSIM_RESUME_STAGGER_SECONDS), so a big fleet does not all start in the same instant."""
+    try:
+        v = float(os.environ.get("CPSIM_RESUME_STAGGER_SECONDS", ""))
+    except ValueError:
+        return DEFAULT_STAGGER
+    return min(v, 60.0) if math.isfinite(v) and v >= 0 else DEFAULT_STAGGER
+
 
 class Runtime:
     def __init__(self, store):
@@ -20,6 +39,33 @@ class Runtime:
         self.hr_runs: dict[str, HrRun] = {}     # the latest run of each company (kept after it ends, for its results)
         self.wl_runners: dict[str, WorkloadRunner] = {}         # the latest runner of each workload (kept after it ends, for its counters)
         self.company_schedules: dict[str, WorkloadRunner] = {}  # companies that repeat their run on a schedule
+
+    # ---- the desired run state: started and not stopped by a person, so it runs again after a restart --------------------
+    def want(self, kind: str, name: str, on: bool) -> None:
+        """Remember (or forget) that this city/workload/company/schedule should be running. Never raises: the run itself matters more."""
+        try:
+            self.store.set_desired(kind, name, on)
+        except Exception as exc:  # noqa: BLE001 - e.g. the database blinked; the run goes on, it just may not resume
+            print(f"cpsim: cannot record the run state of {kind} {name}: {str(exc).splitlines()[0][:120]}", flush=True)
+
+    def wanted(self, kind: str) -> set[str]:
+        try:
+            return self.store.desired(kind)
+        except Exception:  # noqa: BLE001
+            return set()
+
+    def resume_enabled(self) -> bool:
+        try:
+            v = self.store.setting(RESUME_SETTING)
+        except Exception:  # noqa: BLE001
+            v = None
+        return resume_default() if v is None else v == "true"
+
+    def _ends(self, kind: str, name: str, runner) -> None:
+        """A run that finishes by itself (a total or duration was reached) is done, not interrupted: it must not start over after a restart."""
+        task = getattr(runner, "_task", None)
+        if task is not None:
+            task.add_done_callback(lambda _t: self.want(kind, name, False) if runner.state == "done" else None)
 
     def specs(self) -> dict[str, City]:
         out = {}
@@ -60,6 +106,7 @@ class Runtime:
         runner = CityRunner(city, self._sink(city))
         await runner.start()
         self.runners[name] = runner
+        self.want("city", name, True)
         return runner
 
     async def stop(self, name: str) -> bool:
@@ -98,6 +145,48 @@ class Runtime:
                 except (SpecError, RuntimeError) as exc:
                     print(f"cpsim: cannot autostart the schedule of {name}: {exc}", flush=True)
 
+    async def resume(self, stagger: float | None = None) -> None:
+        """After a restart, start again whatever was running when the app went down (the desired-run flags), one item every `stagger`
+        seconds. A failure (target unreachable, credential locked) is one log line and leaves the flag set: the next restart tries again."""
+        if not self.resume_enabled():
+            print("cpsim: resume on start is off: nothing is resumed", flush=True)
+            return
+        stagger = resume_stagger() if stagger is None else stagger
+        plan = [("city", self.specs()), ("workload", self.workloads()), ("schedule", self.companies()), ("company", self.companies())]
+        first = True
+        for kind, known in plan:
+            for name in sorted(self.wanted(kind)):
+                if name not in known or name not in self.wanted(kind):       # deleted, or stopped by a person since the app came up
+                    continue
+                if self._is_running(kind, name):
+                    continue                                                 # already started (start on boot): no second start
+                if not first:
+                    await asyncio.sleep(stagger)
+                first = False
+                try:
+                    await self._resume_one(kind, name)
+                    print(f"cpsim: resumed {kind} {name}", flush=True)
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:  # noqa: BLE001 - never crash the app over one item
+                    print(f"cpsim: cannot resume {kind} {name}: {str(exc).splitlines()[0][:160] if str(exc) else type(exc).__name__}", flush=True)
+
+    def _is_running(self, kind: str, name: str) -> bool:
+        if kind == "city":
+            return name in self.runners
+        table = {"workload": self.wl_runners, "schedule": self.company_schedules, "company": self.hr_runs}[kind]
+        return bool(table.get(name) and table[name].running)
+
+    async def _resume_one(self, kind: str, name: str) -> None:
+        if kind == "city":
+            await self.start(name)
+        elif kind == "workload":
+            self.start_workload(name)
+        elif kind == "schedule":
+            self.start_company_schedule(name)
+        else:
+            self.start_hr(name)
+
     # ---- companies (simulated employers sending requests to TrustDesk) -----------------------------------------
     def companies(self) -> dict[str, Company]:
         out = {}
@@ -130,7 +219,10 @@ class Runtime:
         company = self.company(name)
         if company is None:
             raise KeyError(name)
-        return self._launch_hr(company)
+        run = self._launch_hr(company)        # by a person (or the resume): the schedule's own runs are not remembered, its schedule is
+        self.want("company", name, True)
+        self._ends("company", name, run)
+        return run
 
     def _launch_hr(self, company: Company) -> HrRun:
         name = company.name
@@ -208,6 +300,8 @@ class Runtime:
         runner = self._runner(wl)
         runner.start()
         self.wl_runners[name] = runner
+        self.want("workload", name, True)
+        self._ends("workload", name, runner)
         return runner
 
     async def stop_workload(self, name: str) -> bool:
@@ -243,6 +337,8 @@ class Runtime:
         runner = self._runner(wl, name=f"company/{name}")
         runner.start()
         self.company_schedules[name] = runner
+        self.want("schedule", name, True)
+        self._ends("schedule", name, runner)
         return runner
 
     async def stop_company_schedule(self, name: str) -> bool:

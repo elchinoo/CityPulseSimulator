@@ -209,7 +209,8 @@ async function renderWorkload(box, name) {
         : h("button", { class: "primary", type: "button", onclick: act("start", "Started") }, "Save and start"),
       h("button", { class: "secondary", type: "button", disabled: running, onclick: act("run-once", "One batch sent") }, "Run once"),
       scenario,
-      h("span", { class: "muted" }, running ? "Running: settings are locked until it stops." : "Run once sends a single batch right now and stops.")),
+      h("span", { class: "muted" }, running ? "Running: settings are locked until it stops." : "Run once sends a single batch right now and stops."),
+      running && w.will_resume ? h("span", { class: "muted", id: "wl-resume" }, "Will resume after a restart (Stop to keep it stopped).") : null),
     err, box2,
     h("h2", { class: "section-title" }, "Settings"), h("div", { class: "card" }, form),
     h("div", { class: "btns" }, h("button", { class: "danger", type: "button", onclick: async () => { if (!confirm(`Delete ${name}?`)) return; await api(`/api/workloads/${name}`, { method: "DELETE" }); location.hash = "#workloads"; } }, "Delete workload")));

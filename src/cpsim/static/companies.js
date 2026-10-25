@@ -180,7 +180,9 @@ async function renderCompany(box, name) {
       h("button", { class: "secondary", type: "button", onclick: refresh }, "Refresh TrustDesk statuses"),
       schedRunning ? h("button", { class: "secondary", type: "button", onclick: actSched("stop", "Schedule stopped") }, "Stop schedule")
         : h("button", { class: "secondary", type: "button", disabled: running || !c.schedule, onclick: actSched("start", "Schedule started") }, "Start schedule"),
-      h("span", { class: "muted" }, running ? "Running: settings are locked until it stops." : "Preview shows what would be sent without sending anything.")),
+      h("span", { class: "muted" }, running ? "Running: settings are locked until it stops." : "Preview shows what would be sent without sending anything."),
+      running && c.will_resume ? h("span", { class: "muted", id: "co-resume" }, "Will resume after a restart (Stop to keep it stopped).") : null,
+      schedRunning && c.schedule_will_resume ? h("span", { class: "muted", id: "co-sched-resume" }, "The schedule will resume after a restart (Stop schedule to keep it stopped).") : null),
     c.schedule_run ? h("p", { class: "muted" }, `Schedule ${c.schedule_run.state}: ${c.schedule_run.ticks} runs started, ${c.schedule_run.skipped} ticks skipped, ${c.schedule_run.items} requests`
       + (c.schedule_run.last_error ? `, last error: ${c.schedule_run.last_error}` : "") + (c.schedule_run.fatal ? `, stopped: ${c.schedule_run.fatal}` : "")) : null,
     err, live, preview,

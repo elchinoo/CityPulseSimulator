@@ -133,7 +133,7 @@ async function renderCity(box, name) {
     err.textContent = "";
     try { await api(`/api/cities/${name}`, { method: "PUT", json: spec }); if (msg) toast(msg); renderCity(box, name); } catch (e) { err.textContent = e.message; }
   };
-  const { running, target, ...spec } = city;
+  const { running, target, will_resume, ...spec } = city;
 
   const url = h("input", { id: "c-url", value: city.target_url, placeholder: "https://your-citypulse… (empty: generate only)", disabled: locked });
   const tokenEnv = h("input", { id: "c-token", value: city.token_env, disabled: locked, maxlength: "64" });
@@ -189,7 +189,8 @@ async function renderCity(box, name) {
     locked ? h("button", { class: "secondary", type: "button", onclick: () => act("stop", "Stopped") }, "Stop city") : h("button", { class: "primary", type: "button", onclick: () => act("start", "Started") }, "Start city"),
     h("div", { class: "row left" }, h("label", { for: "storm-secs" }, "Burst the whole city for"), secs,
       h("button", { class: "burst small-burst", type: "button", disabled: !locked, onclick: () => act("burst", "Burst started", { seconds: Number(secs.value) }) }, "BURST")),
-    h("span", { class: "muted" }, locked ? "Running: changes are locked until you stop it." : "Stopped."));
+    h("span", { class: "muted" }, locked ? "Running: changes are locked until you stop it." : "Stopped."),
+    locked && will_resume ? h("span", { class: "muted", id: "c-resume" }, "Will resume after a restart (Stop city to keep it stopped).") : null);
 
   const live = h("div", {});
   const draw = async () => {

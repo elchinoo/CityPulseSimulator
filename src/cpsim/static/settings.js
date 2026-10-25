@@ -92,6 +92,28 @@ function fleetCard() {
     box];
 }
 
+// What runs when the app restarts. The box saves by itself and nothing else on the page is redrawn, so typing elsewhere is never lost.
+function resumeCard() {
+  const box = h("input", { id: "resume-on-start", type: "checkbox", disabled: true });
+  const note = h("p", { class: "hint", id: "resume-note" });
+  const err = h("p", { class: "error", role: "alert" });
+  const show = (d) => {
+    box.checked = d.resume_on_start;
+    box.disabled = false;
+    note.textContent = `One item every ${d.stagger_seconds} s so a big fleet does not start all at once (CPSIM_RESUME_STAGGER_SECONDS). Until this is changed here, the default is ${d.default ? "on" : "off"} (CPSIM_RESUME_ON_START).`;
+  };
+  box.addEventListener("change", async () => {
+    err.textContent = "";
+    const want = box.checked;
+    try { show(await api("/api/run-settings", { method: "PUT", json: { resume_on_start: want } })); toast(want ? "Will resume after a restart" : "Will not resume after a restart"); }
+    catch (ex) { box.checked = !want; err.textContent = ex.message; }
+  });
+  api("/api/run-settings").then(show).catch((ex) => { err.textContent = ex.message; });
+  return [h("h2", { class: "section-title" }, "After a restart"),
+    h("p", { class: "muted" }, "Cities, workloads and company runs or schedules that were running (started by a person or a schedule, and not stopped) start again when the app starts. Stopping one yourself keeps it stopped. This is separate from each one's own \"start when the app starts\" box, which starts it even if it was stopped."),
+    h("div", { class: "card" }, h("label", { class: "check", for: "resume-on-start" }, box, " Resume what was running when the app restarts"), note, err)];
+}
+
 export async function initSettings() {
   const s = await api("/api/session");
   const has = s.has_admin_password;
@@ -115,5 +137,5 @@ export async function initSettings() {
   fill($("view-settings"), h("h1", {}, "Settings"),
     h("p", { class: "muted" }, "Cities and companies are stored in the linked Postgres database, so they survive restarts. A city, company or workload only names the credential it uses (an environment variable name); the value comes from the environment or from Settings > Credentials."),
     h("h2", { class: "section-title" }, "Admin password"), h("div", { class: "card" }, form),
-    ...fleetCard(), ...credentialsCard(), ...tokensCard());
+    ...resumeCard(), ...fleetCard(), ...credentialsCard(), ...tokensCard());
 }

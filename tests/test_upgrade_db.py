@@ -23,7 +23,7 @@ def test_a_database_of_the_first_release_upgrades_in_place(db):
         c.execute("INSERT INTO cpsim_setting VALUES ('admin_password_hash', %s)", (passwords.hash_password("correct-horse-battery"),))
         c.execute("INSERT INTO cpsim_city VALUES ('oldtown', %s)", (json.dumps(CITY),))
         c.commit()
-    assert migrate.run() == ["001_init.sql", "002_workloads.sql", "003_credentials.sql"]
+    assert migrate.run() == ["001_init.sql", "002_workloads.sql", "003_credentials.sql", "004_desired_running.sql"]
     assert migrate.run() == []                                   # idempotent
     assert PgStore().cities()["oldtown"]["groups"][0]["count"] == 3
     with database.connect() as c:
@@ -60,7 +60,7 @@ def test_a_deployment_on_the_previous_schema_gains_workloads_and_keeps_everythin
         c.execute("INSERT INTO cpsim_city VALUES ('oldtown', %s)", (json.dumps(CITY),))
         c.execute("INSERT INTO cpsim_company VALUES ('oldco', %s)", (json.dumps(company),))
         c.commit()
-    assert migrate.run() == ["002_workloads.sql", "003_credentials.sql"]
+    assert migrate.run() == ["002_workloads.sql", "003_credentials.sql", "004_desired_running.sql"]
     assert migrate.run() == []
     store = PgStore()
     assert store.workloads() == {} and store.cities()["oldtown"]["groups"][0]["count"] == 3
@@ -70,3 +70,36 @@ def test_a_deployment_on_the_previous_schema_gains_workloads_and_keeps_everythin
     assert list(store.workloads()) == ["w"]
     store.delete_workload("w")
     assert store.workloads() == {}
+
+
+def test_a_deployment_before_the_run_state_keeps_its_rows_and_gains_the_flags(db, tmp_path):
+    """Apply only 001-003 (what a running install has), put data in it, then run 004: nothing was running, nothing is resumed."""
+    from apgkit import migrate as kit_migrate
+
+    with database.connect() as c:
+        c.execute("DROP SCHEMA public CASCADE; CREATE SCHEMA public")
+        c.commit()
+    for old in ("001_init.sql", "002_workloads.sql", "003_credentials.sql"):
+        (tmp_path / old).write_text((migrate.MIGRATIONS / old).read_text())
+    assert kit_migrate.run(database, tmp_path) == ["001_init.sql", "002_workloads.sql", "003_credentials.sql"]
+    company = {"name": "oldco", "employees": {"new": 1, "tenured": 1}, "requests": {"vacation": 2}}
+    with database.connect() as c:
+        c.execute("INSERT INTO cpsim_city VALUES ('oldtown', %s)", (json.dumps(CITY),))
+        c.execute("INSERT INTO cpsim_company VALUES ('oldco', %s)", (json.dumps(company),))
+        c.execute("INSERT INTO cpsim_workload VALUES ('w', %s)", (json.dumps({"name": "w", "kind": "llmgw"}),))
+        c.commit()
+    assert migrate.run() == ["004_desired_running.sql"]
+    assert migrate.run() == []
+    store = PgStore()
+    assert store.cities()["oldtown"]["groups"][0]["count"] == 3 and list(store.workloads()) == ["w"] and list(store.companies()) == ["oldco"]
+    assert all(store.desired(kind) == set() for kind in ("city", "workload", "company", "schedule"))
+    store.set_desired("city", "oldtown", True)
+    store.set_desired("schedule", "oldco", True)
+    store.save_city("oldtown", CITY)                                         # saving a spec leaves the flag alone
+    assert store.desired("city") == {"oldtown"} and store.desired("schedule") == {"oldco"} and store.desired("company") == set()
+    store.set_desired("city", "oldtown", False)
+    assert store.desired("city") == set()
+    assert store.setting("resume_on_start") is None
+    store.save_setting("resume_on_start", "false")
+    store.save_setting("resume_on_start", "true")
+    assert store.setting("resume_on_start") == "true"

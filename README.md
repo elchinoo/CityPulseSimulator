@@ -359,8 +359,25 @@ city page shows each endpoint). Endpoints bind to loopback unless you tick *Let 
 | `PAYBROKER_SECRET_KEY`, `LLMGW_CLIENT_KEY`, `PAGERLENS_TOKEN` (or the variable a workload names in `token_env`) | Credentials for workloads. Also read from `<NAME>_FILE`, or saved under Settings > Credentials. **Never stored in the workload itself.** A name must contain `TOKEN`, `KEY` or `SECRET` and may not be one of the simulator's own (`CPSIM_*`) or the database's. |
 | `CPSIM_ENCRYPTION_KEY[_FILE]` | Platform secret that unlocks the credential store at start, so credentials saved under Settings > Credentials survive a restart. Without it nothing can be saved. |
 | `CPSIM_MAX_RATE` | Ceiling on items per second, per workload and for all running workloads together (default 200). |
+| `CPSIM_RESUME_ON_START` | Default of the *Resume what was running when the app restarts* switch (on unless `false`); the switch under Settings overrides it. See *Resuming after a restart*. |
+| `CPSIM_RESUME_STAGGER_SECONDS` | Seconds between two resumed items (default 1, at most 60; 0 starts them back to back). |
 | `CPSIM_ALLOW_HTTP_TARGETS` | `true` allows plain `http` to hosts other than this machine, for local stand-ins reached by name (default off: `https` or localhost only). |
 | `CPSIM_ALLOW_ANONYMOUS` | Demo only: disables authentication entirely. |
+
+## Resuming after a restart
+
+A container that is recreated (`ecoctl recreate`, a new image, a resumed sandbox) comes back with nothing running. So the app remembers what *should* be running:
+starting a city, a workload, a company run or a company schedule (by a person, or by its schedule) stores a `desired_running` flag in the database; stopping it
+with **Stop** clears the flag. The app going down is not a stop: the flags are left as they were. When the app starts again it first starts the items marked
+*start on boot*, then resumes every other item whose flag is set, one every `CPSIM_RESUME_STAGGER_SECONDS` (default 1) so a large fleet does not start in the same
+instant. The resume runs in the background: the UI is available while it works.
+
+* A resume that fails (the target address is not set, a credential is locked or missing) prints one `cpsim: cannot resume ...` line and goes on with the rest. The flag stays set, so the next restart tries again; stopping the item by hand clears it.
+* A run that ends by itself (a workload that reached its total, a company run that finished) is done, not interrupted, and is not started again.
+* Settings > *After a restart* has the switch **Resume what was running when the app restarts**. It is stored in the database and is on by default; `CPSIM_RESUME_ON_START=false` changes only the default used until someone sets the switch. With it off, nothing is resumed but the flags are still kept, so turning it back on takes effect at the next restart.
+* A running item's page says *Will resume after a restart* when it will.
+
+How this relates to the per-item **Start when the app starts** box (`autostart` / `start_on_boot`): that box is a fixed choice made while the item is stopped, and it starts the item at every restart even if you had stopped it. The resume follows what was actually running last, so it also covers an item you started by hand, and it respects a **Stop**. Use the box for things that must always run; leave it alone otherwise. An item with both is started once.
 
 ## Single sign-on and roles (the ecosystem identity provider)
 
@@ -436,7 +453,7 @@ make up && make test-db                                                  # all o
 
 Workloads are covered by schedule maths on a fake clock (drift, jitter bounds, skipped ticks, duration and total stops, backoff), every generator checked against the target's own request rules
 (PayBroker's models and the gateway's validator are loaded from the sibling checkouts when present), outcome classification, mock-transport senders, secrets never stored or echoed, the web API per role and scope,
-the schema upgrade, and the headless CLI as a real process with no Postgres. Also covers every protocol stack (including malformed input, dead links, wrong addresses and a pymodbus interoperability
+the schema upgrade (including the run-state flags), resuming after a restart (order, stagger, no double start, a failing item, the switch), and the headless CLI as a real process with no Postgres. Also covers every protocol stack (including malformed input, dead links, wrong addresses and a pymodbus interoperability
 check), the generator (burst probability rises with the percentage; seeds reproduce; every episode behaves as described),
 validation of cities, a whole city across all five protocols into a sink, back-pressure and retry, and the web API.
 The demo-city generator is tested for determinism, variability (districts, types, sizes, protocols), limits, unique names, the API per role, the CLI as a real process without Postgres, and the browser form with a fake DOM (needs `node`).
