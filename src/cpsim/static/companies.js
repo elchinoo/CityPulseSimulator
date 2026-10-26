@@ -2,6 +2,7 @@ import { api } from "/kit/api.js";
 import { guard } from "/static/perm.js";
 import { fleetChoice, targetText, withFleet } from "/static/fleet.js";
 import { $, confirmDialog, field, fill, h, toast } from "/kit/ui.js";
+import { flushCard } from "/static/cards.js";
 
 let catalog = null;
 let timer = null;
@@ -28,7 +29,7 @@ async function renderList(box) {
     h("td", {}, h("span", { class: `st ${STATE[c.state] || "offline"}` }, c.state))));
   fill(box, h("h1", {}, "Companies"),
     h("p", { class: "muted" }, "A company is a simulated employer. It creates employees (new hires and long-serving staff) and sends the number of requests of each type that you choose to TrustDesk, as a client application would."),
-    list.length ? h("div", { class: "card flush" }, h("table", {}, h("thead", {}, h("tr", {}, ...["Company", "Employees", "Requests", "Types", "Sends to", "State"].map((t) => h("th", {}, t)))), h("tbody", {}, ...rows)))
+    list.length ? flushCard("Companies", h("table", {}, h("thead", {}, h("tr", {}, ...["Company", "Employees", "Requests", "Types", "Sends to", "State"].map((t) => h("th", {}, t)))), h("tbody", {}, ...rows)))
       : h("div", { class: "card" }, h("p", { class: "empty" }, "No companies yet. Start from a preset such as “Hundreds of mixed requests”.")),
     h("h2", { class: "section-title" }, "New company"),
     h("div", { class: "card" }, field("Company name", name, "Lowercase letters, digits and dashes."),
@@ -56,7 +57,7 @@ function progress(s) {
         ...kv("Employees", `${s.employees.created} created, ${s.employees.existing} already there, ${s.employees.failed} failed`)),
       st.length ? h("p", {}, "Where TrustDesk has them now: ", ...st.flatMap(([k, n]) => [h("span", { class: "badge" }, `${k.replace("_", " ")} ${n}`), " "]),
         h("span", { class: "muted" }, ` (sample of ${s.status_sample})`)) : null),
-    h("div", { class: "card flush" }, h("table", {}, h("thead", {}, h("tr", {}, ...["Request type", "Planned", "Sent", "Accepted", "Invalid", "Errors", "Withdrawn"].map((x) => h("th", { class: x === "Request type" ? "" : "num" }, x)))), h("tbody", {}, ...rows))),
+    flushCard("Request results", h("table", {}, h("thead", {}, h("tr", {}, ...["Request type", "Planned", "Sent", "Accepted", "Invalid", "Errors", "Withdrawn"].map((x) => h("th", { class: x === "Request type" ? "" : "num" }, x)))), h("tbody", {}, ...rows))),
     s.errors.length ? h("div", { class: "card" }, h("h3", {}, "First problems"), h("ul", {}, ...s.errors.map((e) => h("li", {}, h("strong", {}, e.what), `: ${e.message}`)))) : null);
 }
 
@@ -64,7 +65,7 @@ function previewPanel(p) {
   const rows = Object.entries(p.types).map(([k, c]) => h("tr", {}, h("td", {}, catalog.types.find((x) => x.key === k)?.label || k),
     h("td", { class: "num" }, c.planned), h("td", { class: "num" }, c.problem),
     h("td", {}, h("code", {}, JSON.stringify(p.samples[k]?.[0] || {}).slice(0, 170)))));
-  return h("div", { class: "card flush" }, h("h3", { class: "pad" }, `Preview: ${p.employees} employees (${p.new_hires} new hires), ${p.requests} requests, ${p.problem} built to break a policy · seed ${p.seed}`),
+  return flushCard("Preview", h("h3", { class: "pad" }, `Preview: ${p.employees} employees (${p.new_hires} new hires), ${p.requests} requests, ${p.problem} built to break a policy · seed ${p.seed}`),
     h("table", {}, h("thead", {}, h("tr", {}, ...["Type", "Planned", "Problem", "Example"].map((x) => h("th", {}, x)))), h("tbody", {}, ...rows)));
 }
 

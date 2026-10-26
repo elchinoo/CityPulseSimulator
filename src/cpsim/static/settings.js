@@ -1,5 +1,6 @@
 import { api } from "/kit/api.js";
 import { $, confirmDialog, copy, field, fill, fmtDate, h, toast } from "/kit/ui.js";
+import { flushCard } from "/static/cards.js";
 
 function tokensCard() {
   const reveal = h("div", { hidden: true });
@@ -10,8 +11,8 @@ function tokensCard() {
   const table = h("div", {});
   async function renderTable() {
     const list = await api("/api/tokens");
-    table.replaceChildren(list.length ? h("div", { class: "card flush" }, h("table", {},
-      h("thead", {}, h("tr", {}, ...["Name", "Token", "Access", "Created", "Last used", ""].map((t) => h("th", {}, t)))),
+    table.replaceChildren(list.length ? flushCard("API tokens", h("table", {},
+      h("thead", {}, h("tr", {}, ...["Name", "Token", "Access", "Created", "Last used", "Actions"].map((t) => (t === "Actions" ? h("th", {}, h("span", { class: "sr-only" }, t)) : h("th", {}, t))))),
       h("tbody", {}, ...list.map((t) => h("tr", {},
         h("td", { class: "title" }, t.name), h("td", {}, h("code", {}, `${t.prefix}…`)), h("td", {}, t.scope),
         h("td", {}, fmtDate(t.created_at)), h("td", {}, fmtDate(t.last_used_at)),
@@ -48,8 +49,8 @@ function credentialsCard() {
   async function render() {
     const d = await api("/api/credentials");
     note.textContent = d.unlocked ? "" : "The credential store is locked: the app has no CPSIM_ENCRYPTION_KEY, so nothing can be saved. Signing in with the admin password unlocks it for this session.";
-    box.replaceChildren(h("div", { class: "card flush" }, h("table", {},
-      h("thead", {}, h("tr", {}, ...["Name", "Source", "Used by", "New value", ""].map((t) => h("th", {}, t)))),
+    box.replaceChildren(flushCard("Saved credentials", h("table", {},
+      h("thead", {}, h("tr", {}, ...["Name", "Source", "Used by", "New value", "Actions"].map((t) => (t === "Actions" ? h("th", {}, h("span", { class: "sr-only" }, t)) : h("th", {}, t))))),
       h("tbody", {}, ...d.items.map((c) => {
         const input = h("input", { type: "password", autocomplete: "off", maxlength: "4096", placeholder: c.saved ? "replace saved value" : "paste the credential", disabled: !d.unlocked, "aria-label": `New value for ${c.name}` });
         input.value = typed.get(c.name) || "";
@@ -84,7 +85,7 @@ function fleetCard() {
   api("/api/fleet").then((d) => {
     const rows = (d.vars || []).map((v) => h("tr", {}, h("td", { class: "title" }, h("code", {}, v.name)), h("td", {}, v.label),
       h("td", {}, h("span", { class: `st ${v.set ? "ok" : "offline"}` }, v.set ? "set" : "not set")), h("td", { class: "wrap" }, v.set ? v.value : "")));
-    box.replaceChildren(h("div", { class: "card flush" }, h("table", { id: "fleet-table" },
+    box.replaceChildren(flushCard("Fleet", h("table", { id: "fleet-table" },
       h("thead", {}, h("tr", {}, ...["Variable", "App", "State", "Address"].map((t) => h("th", {}, t)))), h("tbody", {}, ...rows))));
   }).catch((err) => box.replaceChildren(h("p", { class: "error" }, err.message)));
   return [h("h2", { class: "section-title" }, "Fleet"),

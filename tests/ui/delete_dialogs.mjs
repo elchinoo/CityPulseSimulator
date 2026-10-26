@@ -16,14 +16,19 @@ const loader = `export async function resolve(s, c, n) {
 register("data:text/javascript," + encodeURIComponent(loader));
 
 let active = null;
+const modals = [];   // open modal dialogs, last = topmost
 class El {
-  constructor(tag) { this.tag = tag; this.children = []; this.attrs = {}; this.dataset = {}; this.value = ""; this.listeners = {}; this.style = {}; this.parent = null; this.disabled = false; this.className = ""; this.id = ""; this.textContent = ""; this.classes = new Set(); this.classList = { toggle() {}, add: (c) => this.classes.add(c), remove: (c) => this.classes.delete(c) }; }
+  constructor(tag) { this.tag = tag; this.children = []; this.attrs = {}; this.dataset = {}; this.value = ""; this.listeners = {}; this.style = {}; this.parent = null; this.disabled = false; this.className = ""; this.id = ""; this.textContent = ""; this.classes = new Set(); this.classList = { toggle() {}, add: (c) => this.classes.add(c), remove: (c) => this.classes.delete(c) };
+    this.open = false;
+    if (tag === "dialog") this.showModal = () => { this.open = true; modals.push(this); this.setAttribute("open", ""); };   // a native <dialog> opened as a modal
+  }
+  close() { this.open = false; const i = modals.indexOf(this); if (i >= 0) modals.splice(i, 1); }
   get nodeType() { return 1; }
   append(...k) { for (const x of k) { if (x.nodeType === 1) x.parent = this; this.children.push(x); } }
   replaceChildren(...k) { this.children = []; this.append(...k); }
   setAttribute(k, v) { this.attrs[k] = v; if (k === "id") this.id = v; }
   addEventListener(t, f) { (this.listeners[t] ||= []).push(f); }
-  fire(t, ev = {}) { const e = { target: this, preventDefault() {}, ...ev }; for (let n = this; n; n = n.parent) for (const f of n.listeners[t] || []) f(e); }
+  fire(t, ev = {}) { const e = { target: this, defaultPrevented: false, preventDefault() { this.defaultPrevented = true; }, ...ev }; for (let n = this; n; n = n.parent) for (const f of n.listeners[t] || []) f(e); return e; }
   async click() { if (!this.disabled) await Promise.all((this.listeners.click || []).map((f) => f({ target: this, preventDefault() {} }))); }
   focus() { if (!this.disabled) active = this; }
   remove() { if (this.parent) this.parent.children = this.parent.children.filter((c) => c !== this); this.parent = null; }
@@ -61,7 +66,7 @@ state.session = { state: "logged_in", user: { permissions: ["*"] } };
 
 const fail = (m) => { console.error("FAIL: " + m); process.exit(1); };
 const tick = () => new Promise((r) => setTimeout(r, 10));
-const overlay = () => body.find((e) => e.className === "confirm-overlay");
+const overlay = () => body.find((e) => e.attrs.role === "alertdialog");   // the kit's native <dialog>
 const dbtn = (label) => overlay().find((e) => e.tag === "button" && e.text() === label);
 const deletes = () => calls.filter((c) => c.startsWith("DELETE"));
 const press = (view, label) => view.find((e) => e.tag === "button" && e.text() === label);
@@ -77,17 +82,19 @@ const settings = document.getElementById("view-settings");
 await open(settings, "Revoke");
 if (!overlay().text().includes('Revoke "grafana"? Clients using it stop working immediately.')) fail("revoke message changed: " + overlay().text());
 if (dbtn("Revoke").className !== "danger-solid") fail("revoke is not a danger dialog");
+if (overlay().tag !== "dialog" || !overlay().open || modals.at(-1) !== overlay()) fail("the confirmation must be a native <dialog> opened with showModal()");
 if (settings.contains(overlay())) fail("the dialog must live under <body>, outside the page that redraws");
 await dbtn("Cancel").click(); await pending;
-if (overlay() || deletes().length) fail("Cancel must close the dialog and delete nothing");
+if (overlay() || modals.length || deletes().length) fail("Cancel must close the dialog and delete nothing");
 await open(settings, "Revoke");
 await dbtn("Revoke").click(); await pending; await tick();
 if (deletes().join() !== "DELETE /api/tokens/7") fail("confirming revokes exactly once: " + deletes());
 
 await open(settings, "Delete");
 if (!overlay().text().includes("Delete the saved GATEWAY_KEY? Workloads that use it stop working.")) fail("credential message changed");
-overlay().fire("keydown", { key: "Escape" }); await pending;
-if (overlay() || deletes().length !== 1) fail("Escape cancels");
+if (!overlay().fire("cancel").defaultPrevented) fail("native Escape ('cancel') must be prevented: the kit closes the dialog itself");
+await pending;
+if (overlay() || modals.length || deletes().length !== 1) fail("Escape cancels");
 await open(settings, "Delete");
 await dbtn("Delete").click(); await pending; await tick();
 if (deletes().pop() !== "DELETE /api/credentials/GATEWAY_KEY") fail("credential delete not sent");

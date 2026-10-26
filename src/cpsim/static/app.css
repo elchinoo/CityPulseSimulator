@@ -115,11 +115,15 @@ main.wide { max-width: 78rem; }
 button.burst { background: linear-gradient(135deg, #dc2626, #ea580c); color: #fff; font-weight: 800; letter-spacing: .06em; border-radius: 12px; }
 button.small-burst { padding: .45rem 1.3rem; margin-left: .5rem; }
 .st { font-size: .75rem; font-weight: 700; padding: .1rem .5rem; border-radius: 999px; text-transform: uppercase; }
-.st.ok { background: color-mix(in srgb, var(--good) 16%, transparent); color: var(--good); }
-.st.offline { background: color-mix(in srgb, var(--off) 22%, transparent); color: var(--off); }
+/* status pills use the kit tokens, which keep 4.5:1 text contrast on the tinted pill in light and dark */
+.st.ok { background: color-mix(in srgb, var(--ok) 16%, transparent); color: var(--ok); }
+.st.offline { background: color-mix(in srgb, var(--muted) 12%, transparent); color: var(--muted); }
 td.wrap { white-space: normal; min-width: 14rem; }
 h3.pad { padding: 1rem 1rem 0; margin: 0; }
 .card h3 { margin: 0 0 .4rem; font-size: 1rem; }
+/* the city page cards are h2 (h1 then h2, no skipped level) but look like the h3 cards */
+.panel-grid .card h2 { margin: 0 0 .4rem; font-size: 1rem; }
+.panel-grid h2.pad { padding: 1rem 1rem 0; margin: 0; }
 
 /* ---- companies ---- */
 .kinds { display: grid; grid-template-columns: repeat(auto-fill, minmax(19rem, 1fr)); gap: .8rem; margin: .5rem 0 1rem; }
@@ -132,7 +136,7 @@ fieldset.kind legend { font-weight: 700; padding: 0 .4rem; }
 td.num.bad { color: var(--err); font-weight: 700; }
 .banner.bad { background: color-mix(in srgb, var(--err) 12%, var(--surface)); color: var(--err); }
 .pad { padding: 1rem 1rem 0; margin: 0; }
-.st.bad { background: color-mix(in srgb, var(--bad) 16%, transparent); color: var(--bad); }
+.st.bad { background: color-mix(in srgb, var(--err) 16%, transparent); color: var(--err); }
 .kinds + h3, h3 { margin: 1.4rem 0 .4rem; }
 
 /* ---- workloads ---- */

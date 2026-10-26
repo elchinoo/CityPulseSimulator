@@ -2,6 +2,7 @@ import { api } from "/kit/api.js";
 import { guard } from "/static/perm.js";
 import { fleetChoice, targetText, withFleet } from "/static/fleet.js";
 import { $, confirmDialog, field, fill, h, toast } from "/kit/ui.js";
+import { flushCard } from "/static/cards.js";
 
 let catalog = null;
 let timer = null;
@@ -35,7 +36,7 @@ function listTable(list) {
       h("td", { class: "num" }, s ? ms(s.latency_p95) : "n/a"),
       h("td", { class: "wrap" + (s && s.last_error ? " bad" : "") }, s ? s.last_error : ""));
   });
-  return list.length ? h("div", { class: "card flush" }, h("table", {}, h("thead", {}, h("tr", {}, ...["Workload", "Kind", "Sends to", "Batch / every", "State", "Items", "Skipped", "p95", "Last error"].map((t) => h("th", {}, t)))), h("tbody", {}, ...rows)))
+  return list.length ? flushCard("Workloads", h("table", {}, h("thead", {}, h("tr", {}, ...["Workload", "Kind", "Sends to", "Batch / every", "State", "Items", "Skipped", "p95", "Last error"].map((t) => h("th", {}, t)))), h("tbody", {}, ...rows)))
     : h("div", { class: "card" }, h("p", { class: "empty" }, "No workloads yet. Create one below, for example a PayBroker payment stream every 2 seconds."));
 }
 
@@ -92,7 +93,7 @@ function live(s) {
       kpi("skipped ticks", s.skipped, s.skipped ? "warn" : ""), kpi("items sent", s.items.toLocaleString()), kpi("items / s", s.rate),
       kpi("latency p50", ms(s.latency_p50)), kpi("latency p95", ms(s.latency_p95)),
       kpi("next tick in", s.next_tick_in == null ? "n/a" : `${s.next_tick_in} s`), kpi("errors", s.errors_total, s.errors_total ? "bad" : "")),
-    h("div", { class: "card flush" }, h("table", {}, h("thead", {}, h("tr", {}, h("th", {}, "Outcome"), h("th", { class: "num" }, "Items"), h("th", { class: "num" }, "Share"))),
+    flushCard("Outcomes", h("table", {}, h("thead", {}, h("tr", {}, h("th", {}, "Outcome"), h("th", { class: "num" }, "Items"), h("th", { class: "num" }, "Share"))),
       h("tbody", {}, ...(outcomes.length ? outcomes.map(([k, n]) => h("tr", {}, h("td", { class: BAD.has(k) ? "bad" : "" }, k.replace(/_/g, " ")), h("td", { class: "num" }, n.toLocaleString()),
         h("td", { class: "num" }, `${Math.round((100 * n) / total)}%`))) : [h("tr", {}, h("td", { colspan: "3", class: "muted" }, "Nothing sent yet."))])))),
     extra.length ? h("p", { class: "muted" }, extra.map(([k, v]) => `${k.replace(/_/g, " ")}: ${v}`).join(" · ")) : null,

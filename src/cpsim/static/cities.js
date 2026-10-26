@@ -2,6 +2,7 @@ import { api } from "/kit/api.js";
 import { guard } from "/static/perm.js";
 import { fleetChoice, targetText, withFleet } from "/static/fleet.js";
 import { $, confirmDialog, field, fill, h, toast } from "/kit/ui.js";
+import { flushCard } from "/static/cards.js";
 
 let catalog = null;
 let timer = null;
@@ -69,7 +70,7 @@ function summaryTable(r) {
     h("td", { class: "title" }, c.name), h("td", { class: "num" }, c.sensors.toLocaleString()), h("td", { class: "num" }, c.districts.length),
     h("td", {}, c.districts.map((d) => d.kind ? `${d.name} (${d.kind})` : d.name).join(", ")), h("td", { class: "num" }, c.types), h("td", {}, c.protocols.map(label).join(", ")), h("td", { class: "num" }, c.seed)));
   return h("div", {}, h("h3", {}, `Created ${r.created} ${r.created === 1 ? "city" : "cities"}, ${r.sensors.toLocaleString()} sensors in all`),
-    h("div", { class: "card flush" }, h("table", { id: "gen-summary" }, h("thead", {}, h("tr", {}, ...["City", "Sensors", "Districts", "Which", "Types", "Protocols", "Seed"].map((t) => h("th", {}, t)))), h("tbody", {}, ...rows))));
+    flushCard("Generated cities", h("table", { id: "gen-summary" }, h("thead", {}, h("tr", {}, ...["City", "Sensors", "Districts", "Which", "Types", "Protocols", "Seed"].map((t) => h("th", {}, t)))), h("tbody", {}, ...rows))));
 }
 
 // ---- the list ------------------------------------------------------------------------------------
@@ -95,7 +96,7 @@ async function renderList(box) {
     h("td", {}, h("span", { class: `st ${c.running ? "ok" : "offline"}` }, c.running ? "running" : "stopped"))));
   fill(box, h("h1", {}, "Cities"),
     h("p", { class: "muted" }, "A city is a set of sensor groups. Each group picks a sensor type, a count, a value range, a reporting frequency, a protocol and a burst percentage."),
-    cities.length ? h("div", { class: "card flush" }, h("table", {}, h("thead", {}, h("tr", {}, ...["City", "Sensors", "Protocols", "Sends to", "State"].map((t) => h("th", {}, t)))), h("tbody", {}, ...rows)))
+    cities.length ? flushCard("Cities", h("table", {}, h("thead", {}, h("tr", {}, ...["City", "Sensors", "Protocols", "Sends to", "State"].map((t) => h("th", {}, t)))), h("tbody", {}, ...rows)))
       : h("div", { class: "card" }, h("p", { class: "empty" }, "No cities yet. Generate a few demo cities below: each one is different.")),
     h("h2", { class: "section-title" }, "Generate demo cities"), gen,
     h("h2", { class: "section-title" }, "Fixed presets"),
@@ -109,15 +110,15 @@ function statsPanel(s) {
   const eps = Object.entries(s.endpoints || {});
   const bursts = Object.entries(s.bursts || {}).map(([k, n]) => `${k} ×${n}`).join(", ") || "none";
   return h("div", { class: "panel-grid" },
-    h("div", { class: "card" }, h("h3", {}, "Delivery to CityPulse"),
+    h("div", { class: "card" }, h("h2", {}, "Delivery to CityPulse"),
       h("dl", { class: "facts" }, ...kv("Sensors", s.sensors.toLocaleString()), ...kv("Readings sent", s.sent.toLocaleString()), ...kv("Send rate", `${s.send_rate}/s`),
         ...kv("Waiting for retry", s.buffer.toLocaleString()), ...kv("Failed attempts", s.send_failures), ...kv("Dropped", s.dropped),
         ...kv("Uptime", `${s.uptime}s`), ...kv("Status", s.problem || "ok"))),
-    h("div", { class: "card" }, h("h3", {}, "Behaviour"),
+    h("div", { class: "card" }, h("h2", {}, "Behaviour"),
       h("dl", { class: "facts" }, ...kv("Bursts active", bursts), ...kv("City-wide boost", s.boost ? `${s.boost}s left` : "off"),
         ...kv("Silent updates", s.silenced.toLocaleString()), ...kv("Corrupt values", s.bad_values.toLocaleString()),
         ...kv("Devices unreachable", s.devices_unreachable))),
-    h("div", { class: "card flush" }, h("h3", { class: "pad" }, "Field-device endpoints (loopback unless exposed)"),
+    flushCard("Field-device endpoints", h("h2", { class: "pad" }, "Field-device endpoints (loopback unless exposed)"),
       eps.length ? h("table", {}, h("thead", {}, h("tr", {}, ...["Protocol", "Address", "Devices", "Polls ok", "Polls failed"].map((t) => h("th", {}, t)))),
         h("tbody", {}, ...eps.map(([p, e]) => h("tr", {}, h("td", {}, label(p)), h("td", {}, h("code", {}, `${e.host}:${e.port}`)), h("td", { class: "num" }, e.devices),
           h("td", { class: "num" }, (s.polls_ok[p] || 0).toLocaleString()), h("td", { class: "num" }, (s.polls_failed[p] || 0).toLocaleString()))))) :
@@ -201,7 +202,7 @@ async function renderCity(box, name) {
   fill(box, h("a", { href: "#cities" }, "← all cities"), h("h1", {}, city.name),
     controls, err, live,
     h("h2", { class: "section-title" }, `Sensor groups (${spec.groups.reduce((n, g) => n + g.count, 0).toLocaleString()} sensors)`),
-    spec.groups.length ? h("div", { class: "card flush" }, h("table", {}, h("thead", {}, h("tr", {}, ...["Type", "Count", "District", "Protocol", "Range", "Every", "Burst", ""].map((t) => h("th", {}, t)))), h("tbody", {}, ...groupRows)))
+    spec.groups.length ? flushCard("Sensor groups", h("table", {}, h("thead", {}, h("tr", {}, ...["Type", "Count", "District", "Protocol", "Range", "Every", "Burst", "Actions"].map((t) => (t === "Actions" ? h("th", {}, h("span", { class: "sr-only" }, t)) : h("th", {}, t))))), h("tbody", {}, ...groupRows)))
       : h("div", { class: "card" }, h("p", { class: "empty" }, "No sensors yet. Add a group below.")),
     h("h2", { class: "section-title" }, "Add a sensor group"), h("div", { class: "card" }, addGroup),
     h("h2", { class: "section-title" }, "City settings"), h("div", { class: "card" }, settings),
