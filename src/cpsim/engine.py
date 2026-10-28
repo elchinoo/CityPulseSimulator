@@ -14,6 +14,7 @@ import time
 from collections import Counter, deque
 
 from . import __version__, geo
+from . import attrs as attrs_mod
 from .generator import SensorSim
 from .model import City, city_id
 from .protocols import PROTOCOLS, enip, ethercat, modbus, profibus, profinet
@@ -28,6 +29,12 @@ def positions_enabled(city: City) -> bool:
     """A city sends positions when it asks for them (default) and CPSIM_POSITIONS is not switched off for the whole app."""
     off = os.environ.get("CPSIM_POSITIONS", "").strip().lower() in ("0", "false", "no", "off")
     return city.positions and not off
+
+
+def attrs_enabled(city: City) -> bool:
+    """A city sends sensor attrs when it asks for them (default) and CPSIM_ATTRS is not switched off for the whole app."""
+    off = os.environ.get("CPSIM_ATTRS", "").strip().lower() in ("0", "false", "no", "off")
+    return city.attrs and not off
 
 
 class Channel:
@@ -49,12 +56,13 @@ class CityRunner:
                 sid = f"{g.type.replace('_', '-')}-{g.district}-{city.name}-{len(self.sensors):05d}"
                 if len(sid) > 64:   # long names: shorten the descriptive parts, never the unique index
                     sid = f"{g.type.replace('_', '-')[:12]}-{g.district[:6]}-{city_id(city.name)[:20]}-{len(self.sensors):05d}"
-                self.sensors.append(SensorSim(sid, g.type, g.district, g.protocol, lo, hi, g.frequency, g.burst_pct, city.seed, t0))
+                self.sensors.append(SensorSim(sid, g.type, g.district, g.protocol, lo, hi, g.frequency, g.burst_pct, city.seed, t0, city.name))
         self.coords: dict[str, tuple[float, float]] = {}       # sensor id -> (lat, lon); empty when positions are off
         if positions_enabled(city):
             cmap = geo.CityMap(city.name, {s.district for s in self.sensors})
             self.coords = {s.id: cmap.position(s.id, s.district) for s in self.sensors}
-        self.sent_n: dict[str, int] = {}                       # readings emitted per sensor (decides when a position travels)
+        self.send_attrs = attrs_enabled(city)
+        self.sent_n: dict[str, int] = {}                       # readings emitted per sensor (decides when a position or attrs travel)
         self.devices: dict[str, dict[int, Device]] = {p: {} for p in PROTOCOLS}
         self.channels: dict[str, dict[int, list[Channel]]] = {p: {} for p in PROTOCOLS}
         self.channel_of: dict[str, tuple[Channel, str, int]] = {}      # sensor id -> channel, protocol, device address
@@ -164,11 +172,13 @@ class CityRunner:
         reading = {"sensor": s.id, "type": s.type, "district": s.district, "protocol": s.protocol,
                    "city": self.city_id, "value": None if bad else round(value, 4), "ts": round(self.now(), 3)}
         xy = self.coords.get(s.id)
-        if xy:
+        if xy or self.send_attrs:
             n = self.sent_n.get(s.id, 0)
             self.sent_n[s.id] = n + 1
-            if n % geo.POSITION_EVERY == 0:
+            if xy and n % geo.POSITION_EVERY == 0:
                 reading["lat"], reading["lon"] = xy
+            if self.send_attrs and n % attrs_mod.ATTRS_EVERY == 0:
+                reading["attrs"] = attrs_mod.sensor_attrs(s.id, s.type, s.district, self.city.name)
         self.buffer.append(reading)
         if len(self.buffer) > BUFFER_MAX:
             self.buffer.popleft()

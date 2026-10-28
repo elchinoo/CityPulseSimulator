@@ -125,7 +125,7 @@ Redirects are never followed, and a credential is only ever sent to the target U
 | Aspect | Detail |
 |---|---|
 | Call | `POST {target}/api/readings`, JSON `{"readings": [...]}`; batches of 100 readings, up to 8 batches per second (`engine.py`). |
-| Reading | `sensor`, `type`, `district`, `protocol`, `city`, `value` (`null` for a corrupt value), `ts`, and `lat`/`lon` on a sensor's first reading and every 30th after (see 8.1.1). The `city` is the city's name, shortened to 32 characters plus an 8-hex hash when longer (CityPulse's limit). |
+| Reading | `sensor`, `type`, `district`, `protocol`, `city`, `value` (`null` for a corrupt value), `ts`, and `lat`/`lon` (8.1.1) and `attrs` (8.1.2) on a sensor's first reading and every 30th after. The `city` is the city's name, shortened to 32 characters plus an 8-hex hash when longer (CityPulse's limit). |
 | Credential | `CITYPULSE_INGEST_TOKEN` (or the city's `token_env`); otherwise a service token with scope **`citypulse.ingest`**. |
 | Env vars | `CITYPULSE_URL` (fleet address), `CITYPULSE_INGEST_TOKEN`, `CPSIM_OIDC_ISSUER`, `CPSIM_SERVICE_CLIENT_ID/_SECRET`. |
 | Errors | 401 or 403: "CityPulse refused the token", readings stay in the retry buffer, wait 30 s. 429, 502, 503, 504: retry, honouring `Retry-After`. Other errors: retry. Backoff doubles from 1 s up to 20 s. Buffer holds 100,000 readings, then the oldest are dropped and counted. |
@@ -397,6 +397,7 @@ default file path.
 | `CPSIM_MAX_RATE` | `200` | Ceiling on items per second, per workload and for all running workloads together. A workload above it is refused when saved; starting one that would push the total above it is refused. (Company runs are limited separately: at most 200 requests per second per company.) |
 | `CPSIM_ALLOW_HTTP_TARGETS` | off | `1`, `true` or `yes` allows plain `http` to hosts other than this machine **for workloads**, for local stand-ins reached by name. |
 | `CPSIM_POSITIONS` | on | `0`, `false`, `no` or `off` stops every city sending `lat`/`lon` (8.1.1); the per-city `positions` setting is the finer switch. |
+| `CPSIM_ATTRS` | on | `0`, `false`, `no` or `off` stops every city sending sensor `attrs` (8.1.2); the per-city `attrs` setting is the finer switch. |
 | `CPSIM_RESUME_ON_START` | on | Default of the "Resume what was running when the app restarts" switch (off for `0`, `false`, `no`, `off`). The switch under Settings overrides it. |
 | `CPSIM_RESUME_STAGGER_SECONDS` | `1` | Seconds between two resumed items; `0` to `60`; invalid values fall back to 1. |
 | `CPSIM_DATA_DIR` | ignored | Left over from the file store that is gone. Use `cpsim import-files <dir>` once to load old data. |
@@ -457,6 +458,16 @@ Every sensor has a position (`src/cpsim/geo.py`), sent to CityPulse as `lat` and
 * **When it is sent.** CityPulse keeps the last position it received (`coalesce`), so a sensor sends it on its first reading and every 30th after that (survives a CityPulse database reset, about 1 % extra payload).
 * **Turning it off.** City setting `positions` (default `true`; in a spec file `positions: false`) or, for the whole app, `CPSIM_POSITIONS=off`. CityPulse ignores unknown fields on a reading, so an older version without positions still accepts them; it simply does not store them.
 * **Limits.** Only the HTTP path to CityPulse carries coordinates. The simulator has no OTLP sender; the field-protocol hops (Modbus, EtherNet/IP, EtherCAT, PROFINET, PROFIBUS) carry values only, positions are attached by the gateway when it builds the reading.
+
+### 8.1.2 Sensor attributes
+
+Every sensor has device metadata (`src/cpsim/attrs.py`), sent to CityPulse as `attrs` so its sensor filters (`attrs`, `attrs_path`), the JSONB sensor detail and the "vendor or firmware stands out" part of district explain have data.
+
+* **Shape.** `vendor`, `firmware`, `install_date`, `calibration` (`offset`, `scale`, `date`) and `tags` (one to three), under 200 bytes (a test caps it at 400): well inside what CityPulse accepts (two levels, keys `[a-z][a-z0-9_]*`, 1024 bytes). Vendors are made-up names, three or four per sensor type; install dates fall in a fixed five-year window ending 2026-10-01 (no clock, so nothing drifts); calibration offset is within +-0.2 and scale within 1 +- 0.01.
+* **Deterministic.** A pure function of the sensor id, type and city (sha256), independent of the seed and the clock: the same sensor keeps its metadata across restarts and recreates.
+* **Synthetic sample behaviour: one firmware faults more.** About 8 % of the sensors run the old firmware `1.4.2` (every vendor has it; the newer versions differ per vendor). The generator makes those sensors start fault episodes three times as often, so "firmware 1.4.2 stands out among the problem sensors" is really true in the data CityPulse explains. Real devices have no such rule; it exists to give the metadata something to find. It is a property of the sensor, so it also holds when attrs are not sent, and it raises the city's overall burst rate by about 16 %; other sensors are unchanged.
+* **When it is sent.** On a sensor's first reading and every 30th after that, together with the position (CityPulse keeps the last attrs it received and never overwrites them with null), about 6 bytes per reading on average.
+* **Turning it off.** City setting `attrs` (default `true`; in a spec file `attrs: false`; validated like `positions`, no UI checkbox) or, for the whole app, `CPSIM_ATTRS=off`. It does not affect positions.
 
 ### 8.2 Protocols
 

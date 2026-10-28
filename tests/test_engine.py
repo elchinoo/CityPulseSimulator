@@ -47,7 +47,7 @@ async def test_every_protocol_delivers_readings_that_reach_the_sink():
         by.setdefault(r["protocol"], set()).add(r["sensor"])
     assert set(by) == {*PROTOCOLS, "direct"}                                     # all five stacks plus direct
     assert len(by["modbus_tcp"]) == 40 and all(len(by[p]) == 5 for p in ("ethernet_ip", "ethercat", "profinet", "profibus", "direct"))
-    assert all(set(r) - {"lat", "lon"} == {"sensor", "type", "district", "protocol", "city", "value", "ts"} for r in sink.got)
+    assert all(set(r) - {"lat", "lon", "attrs"} == {"sensor", "type", "district", "protocol", "city", "value", "ts"} for r in sink.got)
     assert {r["sensor"] for r in sink.got if "lat" in r} == {r["sensor"] for r in sink.got}   # every sensor sent its position once
     assert {r["city"] for r in sink.got} == {runner.city.name}
     assert all(isinstance(r["value"], float) and -50 <= r["value"] <= 5000 for r in sink.got)

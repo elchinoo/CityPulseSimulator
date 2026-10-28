@@ -60,6 +60,7 @@ class City:
     expose: bool = False              # bind the protocol servers to all interfaces instead of loopback
     autostart: bool = False           # start this city when the app starts
     positions: bool = True            # send each sensor's lat/lon (cpsim.geo) with its readings; false for senders that predate them
+    attrs: bool = True                # send each sensor's device metadata (cpsim.attrs: vendor, firmware ...) with its readings
     groups: list[Group] = field(default_factory=list)
 
     def sensor_count(self) -> int:
@@ -133,7 +134,7 @@ def parse_group(d: dict) -> Group:
 def parse_city(d: dict) -> City:
     if not isinstance(d, dict):
         raise SpecError("a city must be an object")
-    unknown = set(d) - {"name", "target_url", "token_env", "seed", "poll_interval", "expose", "autostart", "positions", "groups"}
+    unknown = set(d) - {"name", "target_url", "token_env", "seed", "poll_interval", "expose", "autostart", "positions", "attrs", "groups"}
     if unknown:
         raise SpecError(f"unknown city field(s): {', '.join(sorted(unknown))}")
     name = d.get("name")
@@ -152,6 +153,7 @@ def parse_city(d: dict) -> City:
     city = City(name, check_target(d.get("target_url") or ""), token_env, seed,
                 _num(d.get("poll_interval", 2.0), "poll_interval", 0.5, 60), bool(d.get("expose", False)),
                 bool(d.get("autostart", False)), _flag(d.get("positions", True), "positions"),
+                _flag(d.get("attrs", True), "attrs"),
                 [parse_group(g) for g in groups_raw])
     if city.sensor_count() > MAX_CITY_SENSORS:
         raise SpecError(f"a city can have at most {MAX_CITY_SENSORS} sensors")

@@ -9,6 +9,7 @@ import random
 from dataclasses import dataclass
 from datetime import datetime
 
+from . import attrs as attrs_mod
 from .catalog import TYPES, hash_str
 
 BASE_START = 0.04
@@ -24,10 +25,12 @@ class Tick:
 
 class SensorSim:
     def __init__(self, sid: str, kind: str, district: str, protocol: str, lo: float, hi: float, frequency: float,
-                 burst_pct: float, seed: int | None, now: float):
+                 burst_pct: float, seed: int | None, now: float, city: str = ""):
         self.id, self.type, self.district, self.protocol = sid, kind, district, protocol
         self.lo, self.hi, self.frequency, self.burst_pct = lo, hi, frequency, burst_pct
         self.spec = TYPES[kind]
+        self.city = city
+        self.fault_factor = attrs_mod.fault_factor(sid, kind, city)       # synthetic: the rare old firmware faults more (see attrs.py)
         self.rng = random.Random(None if seed is None else seed ^ hash_str(sid))
         self.bias = self.rng.gauss(0, (hi - lo) * 0.01)
         self.due = now + self.rng.uniform(0, frequency)          # spread first readings over one period
@@ -54,7 +57,7 @@ class SensorSim:
 
     # ---- bursts -------------------------------------------------------------------------------
     def _maybe_start(self, boost: float) -> None:
-        p = min(1.0, self.burst_pct / 100 * BASE_START * boost)
+        p = min(1.0, self.burst_pct / 100 * BASE_START * boost * self.fault_factor)
         if self.episode is None and p > 0 and self.rng.random() < p:
             self.episode = self.rng.choices(_KIND_NAMES, _KIND_WEIGHTS)[0]
             self.left = self.rng.uniform(20, 120) if self.episode == "dropout" else self.rng.randint(3, 20)
