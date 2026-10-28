@@ -59,6 +59,7 @@ class City:
     poll_interval: float = 2.0        # how often the gateway polls field devices
     expose: bool = False              # bind the protocol servers to all interfaces instead of loopback
     autostart: bool = False           # start this city when the app starts
+    positions: bool = True            # send each sensor's lat/lon (cpsim.geo) with its readings; false for senders that predate them
     groups: list[Group] = field(default_factory=list)
 
     def sensor_count(self) -> int:
@@ -72,6 +73,12 @@ def _num(value, what: str, lo: float, hi: float) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or not lo <= value <= hi:
         raise SpecError(f"{what} must be a number between {lo:g} and {hi:g}")
     return float(value)
+
+
+def _flag(value, what: str) -> bool:
+    if not isinstance(value, bool):
+        raise SpecError(f"{what} must be true or false")
+    return value
 
 
 def check_target(url: str, allow_http: bool = False) -> str:
@@ -126,7 +133,7 @@ def parse_group(d: dict) -> Group:
 def parse_city(d: dict) -> City:
     if not isinstance(d, dict):
         raise SpecError("a city must be an object")
-    unknown = set(d) - {"name", "target_url", "token_env", "seed", "poll_interval", "expose", "autostart", "groups"}
+    unknown = set(d) - {"name", "target_url", "token_env", "seed", "poll_interval", "expose", "autostart", "positions", "groups"}
     if unknown:
         raise SpecError(f"unknown city field(s): {', '.join(sorted(unknown))}")
     name = d.get("name")
@@ -144,7 +151,8 @@ def parse_city(d: dict) -> City:
         raise SpecError(f"groups must be a list of at most {MAX_GROUPS}")
     city = City(name, check_target(d.get("target_url") or ""), token_env, seed,
                 _num(d.get("poll_interval", 2.0), "poll_interval", 0.5, 60), bool(d.get("expose", False)),
-                bool(d.get("autostart", False)), [parse_group(g) for g in groups_raw])
+                bool(d.get("autostart", False)), _flag(d.get("positions", True), "positions"),
+                [parse_group(g) for g in groups_raw])
     if city.sensor_count() > MAX_CITY_SENSORS:
         raise SpecError(f"a city can have at most {MAX_CITY_SENSORS} sensors")
     for proto, limit in DEVICE_LIMITS.items():

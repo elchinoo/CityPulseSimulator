@@ -7,12 +7,13 @@ and go straight to the sender. The sender keeps a bounded retry buffer and backs
 """
 import asyncio
 import math
+import os
 import random
 import sys
 import time
 from collections import Counter, deque
 
-from . import __version__
+from . import __version__, geo
 from .generator import SensorSim
 from .model import City, city_id
 from .protocols import PROTOCOLS, enip, ethercat, modbus, profibus, profinet
@@ -21,6 +22,12 @@ from .sinks import Fatal, NullSink, Retry
 
 TICK, BATCH, MAX_SENDS_PER_TICK, BUFFER_MAX, MAX_POLLS_IN_FLIGHT = 0.25, 100, 8, 100_000, 32
 BIND_LOOPBACK = "127.0.0.1"
+
+
+def positions_enabled(city: City) -> bool:
+    """A city sends positions when it asks for them (default) and CPSIM_POSITIONS is not switched off for the whole app."""
+    off = os.environ.get("CPSIM_POSITIONS", "").strip().lower() in ("0", "false", "no", "off")
+    return city.positions and not off
 
 
 class Channel:
@@ -43,6 +50,11 @@ class CityRunner:
                 if len(sid) > 64:   # long names: shorten the descriptive parts, never the unique index
                     sid = f"{g.type.replace('_', '-')[:12]}-{g.district[:6]}-{city_id(city.name)[:20]}-{len(self.sensors):05d}"
                 self.sensors.append(SensorSim(sid, g.type, g.district, g.protocol, lo, hi, g.frequency, g.burst_pct, city.seed, t0))
+        self.coords: dict[str, tuple[float, float]] = {}       # sensor id -> (lat, lon); empty when positions are off
+        if positions_enabled(city):
+            cmap = geo.CityMap(city.name, {s.district for s in self.sensors})
+            self.coords = {s.id: cmap.position(s.id, s.district) for s in self.sensors}
+        self.sent_n: dict[str, int] = {}                       # readings emitted per sensor (decides when a position travels)
         self.devices: dict[str, dict[int, Device]] = {p: {} for p in PROTOCOLS}
         self.channels: dict[str, dict[int, list[Channel]]] = {p: {} for p in PROTOCOLS}
         self.channel_of: dict[str, tuple[Channel, str, int]] = {}      # sensor id -> channel, protocol, device address
@@ -149,8 +161,15 @@ class CityRunner:
         if bad:
             self.stats["bad_values"] += 1
         self.stats["readings"] += 1
-        self.buffer.append({"sensor": s.id, "type": s.type, "district": s.district, "protocol": s.protocol,
-                            "city": self.city_id, "value": None if bad else round(value, 4), "ts": round(self.now(), 3)})
+        reading = {"sensor": s.id, "type": s.type, "district": s.district, "protocol": s.protocol,
+                   "city": self.city_id, "value": None if bad else round(value, 4), "ts": round(self.now(), 3)}
+        xy = self.coords.get(s.id)
+        if xy:
+            n = self.sent_n.get(s.id, 0)
+            self.sent_n[s.id] = n + 1
+            if n % geo.POSITION_EVERY == 0:
+                reading["lat"], reading["lon"] = xy
+        self.buffer.append(reading)
         if len(self.buffer) > BUFFER_MAX:
             self.buffer.popleft()
             self.stats["dropped"] += 1

@@ -125,7 +125,7 @@ Redirects are never followed, and a credential is only ever sent to the target U
 | Aspect | Detail |
 |---|---|
 | Call | `POST {target}/api/readings`, JSON `{"readings": [...]}`; batches of 100 readings, up to 8 batches per second (`engine.py`). |
-| Reading | `sensor`, `type`, `district`, `protocol`, `city`, `value` (`null` for a corrupt value), `ts`. The `city` is the city's name, shortened to 32 characters plus an 8-hex hash when longer (CityPulse's limit). |
+| Reading | `sensor`, `type`, `district`, `protocol`, `city`, `value` (`null` for a corrupt value), `ts`, and `lat`/`lon` on a sensor's first reading and every 30th after (see 8.1.1). The `city` is the city's name, shortened to 32 characters plus an 8-hex hash when longer (CityPulse's limit). |
 | Credential | `CITYPULSE_INGEST_TOKEN` (or the city's `token_env`); otherwise a service token with scope **`citypulse.ingest`**. |
 | Env vars | `CITYPULSE_URL` (fleet address), `CITYPULSE_INGEST_TOKEN`, `CPSIM_OIDC_ISSUER`, `CPSIM_SERVICE_CLIENT_ID/_SECRET`. |
 | Errors | 401 or 403: "CityPulse refused the token", readings stay in the retry buffer, wait 30 s. 429, 502, 503, 504: retry, honouring `Retry-After`. Other errors: retry. Backoff doubles from 1 s up to 20 s. Buffer holds 100,000 readings, then the oldest are dropped and counted. |
@@ -396,6 +396,7 @@ default file path.
 |---|---|---|
 | `CPSIM_MAX_RATE` | `200` | Ceiling on items per second, per workload and for all running workloads together. A workload above it is refused when saved; starting one that would push the total above it is refused. (Company runs are limited separately: at most 200 requests per second per company.) |
 | `CPSIM_ALLOW_HTTP_TARGETS` | off | `1`, `true` or `yes` allows plain `http` to hosts other than this machine **for workloads**, for local stand-ins reached by name. |
+| `CPSIM_POSITIONS` | on | `0`, `false`, `no` or `off` stops every city sending `lat`/`lon` (8.1.1); the per-city `positions` setting is the finer switch. |
 | `CPSIM_RESUME_ON_START` | on | Default of the "Resume what was running when the app restarts" switch (off for `0`, `false`, `no`, `off`). The switch under Settings overrides it. |
 | `CPSIM_RESUME_STAGGER_SECONDS` | `1` | Seconds between two resumed items; `0` to `60`; invalid values fall back to 1. |
 | `CPSIM_DATA_DIR` | ignored | Left over from the file store that is gone. Use `cpsim import-files <dir>` once to load old data. |
@@ -446,6 +447,16 @@ the server enforces the same rules.
   (dropout 20 to 120 seconds): `spike`, `noise`, `stuck`, `dropout`, `flood` (five times as often) or `corrupt` (sent as `null`). A city seed makes values and bursts reproducible.
 * **Districts**: ids of the form `[a-z0-9][a-z0-9_-]{0,23}`; the generator makes up names (`alder-quay`) and gives each district a kind with sensor affinities.
 * **Delete city** asks you to type the city's name.
+
+### 8.1.1 Positions on the map
+
+Every sensor has a position (`src/cpsim/geo.py`), sent to CityPulse as `lat` and `lon` (WGS 84 decimal degrees, 6 decimals) so its map, `/api/sensors/nearby`, the GeoJSON endpoints and the geographic part of district explain have data.
+
+* **Cities can be real or invented.** A built-in table anchors known names (case-insensitive, dashes or spaces): `gotham` is New York, `metropolis` is Chicago, plus london, paris, berlin, madrid, lisbon, rome, tokyo, sydney, new york, chicago, san francisco, boston, toronto, sao paulo, mexico city, mumbai, singapore, cape town, dubai and amsterdam. Any other name is placed at a deterministic spot derived from a hash of the name (latitude -50 to 58, longitude -165 to 165: no poles, no antimeridian). Positions are real WGS 84, so `ST_DWithin` distances are true metres. CityPulse's map is plain SVG drawn from GeoJSON (no basemap tiles), so invented cities need no real geography.
+* **Districts** take 1.5 km cells on a square spiral around the origin, ordered by kind (read from the generated name: `alder-quay` is a harbour): centres and old towns near the origin, then markets, campuses, housing, parks, rivers, harbours, industry, suburbs, airports, farmland outward; hand-made ids such as `d01` count as housing. A sensor sits at a hash-of-its-id spot inside its district's cell (10 % margin). Nothing depends on the seed or the clock, so a restart or recreate gives the same map; adding a district can move the districts that sort after it.
+* **When it is sent.** CityPulse keeps the last position it received (`coalesce`), so a sensor sends it on its first reading and every 30th after that (survives a CityPulse database reset, about 1 % extra payload).
+* **Turning it off.** City setting `positions` (default `true`; in a spec file `positions: false`) or, for the whole app, `CPSIM_POSITIONS=off`. CityPulse ignores unknown fields on a reading, so an older version without positions still accepts them; it simply does not store them.
+* **Limits.** Only the HTTP path to CityPulse carries coordinates. The simulator has no OTLP sender; the field-protocol hops (Modbus, EtherNet/IP, EtherCAT, PROFINET, PROFIBUS) carry values only, positions are attached by the gateway when it builds the reading.
 
 ### 8.2 Protocols
 
