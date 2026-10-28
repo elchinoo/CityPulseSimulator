@@ -23,6 +23,8 @@ DENIED_TABLES = (
     "app_setting",            # kit settings and the vault store (wrapped data key, admin password hash)
     "web_session", "api_token", "oidc_login",     # session / API token hashes, PKCE verifiers
 )
+REASSERT_EVERY = 300      # seconds: the re-assert loop (api.lifespan) re-runs `apply` and counts drift on DENIED_TABLES, because grants made
+                          # after startup (`agentpg db-users create`, default privileges) reopen base tables
 
 
 def apply(conn: psycopg.Connection, role: str = ROLE) -> dict[str, object]:

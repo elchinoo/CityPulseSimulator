@@ -66,6 +66,8 @@ the credentials the workloads need, narrow and revocable. Running (`sim:run`), e
 **Known limits.** Rate limiting is per process. A leaked ingest token lets an attacker push readings to CityPulse
 (bounded by its validation) until revoked; use one token per simulator.
 
+**Masking durability.** The read-only database role's REVOKEs on the secret tables are re-asserted every 5 minutes (grants after startup, from `agentpg db-users create` or default privileges, would otherwise reopen them); gauge `masking_drift_tables` and `/readyz` `masking` show drift. A new grant can be readable for up to one interval.
+
 **Saved credentials.** Credentials may be saved in the app (Settings > Credentials) instead of the environment. They are encrypted with the kit's
 vault, whose data key is wrapped under the platform secret `CPSIM_ENCRYPTION_KEY` and the admin password; the database alone cannot decrypt
 them. Plaintext exists only in process memory; no endpoint returns it and the interface never shows it. Names must contain `TOKEN`, `KEY` or

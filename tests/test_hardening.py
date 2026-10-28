@@ -3,6 +3,7 @@ import re
 
 import psycopg
 import pytest
+from apgkit import masking
 from conftest import TEST_DATABASE_URL
 from psycopg.conninfo import make_conninfo
 from psycopg.rows import dict_row
@@ -47,6 +48,27 @@ def test_read_only_login_cannot_read_secret_tables(ro):
         ro.execute(f"SELECT count(*) FROM {t}")
     with pytest.raises(psycopg.Error):
         ro.execute("INSERT INTO cpsim_city (name, spec) VALUES ('x', '{}')")
+
+
+def test_grant_after_startup_is_closed_again_by_one_reassert_tick(ro, client):  # noqa: F811
+    """`agentpg db-users create` / default privileges re-grant SELECT on base tables after the startup hook ran."""
+    with core.db.connect() as c:
+        for t in hardening.DENIED_TABLES:
+            c.execute(f'GRANT SELECT ON public."{t}" TO a1p_readonly')
+        c.commit()
+        assert masking.drift(c, hardening.DENIED_TABLES) == list(hardening.DENIED_TABLES)
+    ro.execute("SELECT ciphertext FROM cpsim_credential")                    # the hole: readable until the tick
+    assert masking.reassert_tick(core.db.connect, hardening.apply, deny=hardening.DENIED_TABLES, metrics=core.metrics) is True
+    for t in hardening.DENIED_TABLES:
+        with pytest.raises(psycopg.errors.InsufficientPrivilege):
+            ro.execute(f'SELECT * FROM "{t}"')
+    st = masking.status()
+    assert st["ok"] and st["drift"] == len(hardening.DENIED_TABLES) and st["last_ok"]
+    assert masking.reassert_tick(core.db.connect, hardening.apply, deny=hardening.DENIED_TABLES, metrics=core.metrics) is True
+    assert masking.status()["drift"] == 0
+    assert b"masking_drift_tables" in core.metrics.render()[0]
+    r = client.get("/readyz")                                               # reported, never failing readiness
+    assert r.status_code == 200 and r.json()["masking"]["ok"] is True
 
 
 def test_every_secret_looking_column_is_covered(ro):

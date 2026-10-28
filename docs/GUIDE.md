@@ -548,6 +548,8 @@ Limits: only the table owner can REVOKE (checked, with a logged warning if it di
 until it is added to `DENIED_TABLES` (a test fails when a column named like a hash, secret, token, cipher or password is readable). The app's own owner connection, `a1p_readwrite` members and the hosted MCP
 endpoint reached with `agentpg token` (a read-write session, see `ecosystem/docs/06`) are not restricted.
 
+Masking durability: grants made after startup reopen tables (`agentpg db-users create` and AgentPG's default privileges can give `a1p_readonly` SELECT on a base table again at any time). The app therefore re-asserts the masking every 5 minutes (`masking.reassert_forever`, started in the lifespan, running `hardening.apply` on its own connection), the Prometheus gauge `masking_drift_tables` counts the denied tables that were readable before the last re-assert (alert on `> 0`), `masking_last_ok_timestamp` shows the last success, and `/readyz` reports `masking` (`last_ok`, `drift`, `ok`; report only, it never makes readiness fail). A grant made just after a tick stays open until the next one (at most 5 minutes).
+
 ## 9. HTTP API reference
 
 Interface is JSON over HTTP; there is no OpenAPI page (`docs_url`, `redoc_url`, `openapi_url` are disabled). Authenticate with `Authorization: Bearer <API key | cs_ token | service access token>`
@@ -556,7 +558,7 @@ Interface is JSON over HTTP; there is no OpenAPI page (`docs_url`, `redoc_url`, 
 | Method and path | Permission | Purpose |
 |---|---|---|
 | `GET /healthz` | public | `{"status":"ok","version","cities_running"}` |
-| `GET /readyz` | public | `{"status":"ready"}`, or 503 `waking-database` when Postgres does not answer |
+| `GET /readyz` | public | `{"status":"ready","masking":{...}}`, or 503 `waking-database` when Postgres does not answer |
 | `GET /metrics` | `metrics:scrape` (cookies refused) | Prometheus text |
 | `GET /api/session`, `POST /api/setup`, `POST /api/login`, `POST /api/logout`, `GET /auth/login`, `GET /auth/callback` | public | sign-in state and flows |
 | `POST /api/admin-password`, `GET/POST/DELETE /api/tokens`, `GET/PUT/DELETE /api/credentials[/name]`, `GET/PUT /api/run-settings` | `settings:manage` | administration |

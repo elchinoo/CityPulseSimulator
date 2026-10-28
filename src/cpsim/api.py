@@ -5,7 +5,7 @@ from datetime import date
 from pathlib import Path
 
 import psycopg
-from apgkit import insights
+from apgkit import insights, masking
 from apgkit.auth.rp import safe_return_to
 from apgkit.config import env_bool
 from apgkit.guard import SecurityGuard
@@ -15,7 +15,7 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import __version__, auth, citygen, core, credentials, fleet, metrics, reporter
+from . import __version__, auth, citygen, core, credentials, fleet, hardening, metrics, reporter
 from .catalog import DISTRICT_KINDS, DISTRICTS, GROUPS, TYPES
 from .core import COOKIE, CSRF_HEADER, fed, local
 from .districts import KINDS as DISTRICT_KIND_NAMES
@@ -73,11 +73,15 @@ async def lifespan(_: FastAPI):
     rep = reporter.maybe_start(runtime)
     if rep:
         tasks.append(asyncio.create_task(rep.run()))
+    # grants after startup (agentpg db-users create, default privileges) reopen the secret tables: re-assert the denial every 5 minutes
+    tasks.append(asyncio.create_task(masking.reassert_forever(
+        core.db.connect, hardening.apply, hardening.REASSERT_EVERY, deny=hardening.DENIED_TABLES, metrics=core.metrics)))
     try:
         yield
     finally:
         for t in tasks:
             t.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
         await runtime.stop_all()
 
 
@@ -127,7 +131,8 @@ def healthz():
 
 @app.get("/readyz")
 def readyz():
-    return {"status": "ready"} if store.healthy() else JSONResponse({"status": "waking-database"}, status_code=503)
+    m = masking.status()                    # report only: drift never fails readiness
+    return {"status": "ready", "masking": m} if store.healthy() else JSONResponse({"status": "waking-database", "masking": m}, status_code=503)
 
 
 @app.get("/metrics", dependencies=[Depends(require("metrics:scrape", allow_cookie=False))])
