@@ -5,7 +5,7 @@
 #   docker compose -f docker-compose.live.yml --env-file .env.live --profile paybroker up --build
 #   docker compose -f docker-compose.live.yml --env-file .env.live --profile all up        # every kind at once
 #
-# One service per kind (profiles: paybroker, llmgw, pagerlens, trustdesk, identity, citypulse, all). To edit a workload, change the
+# One service per kind (profiles: paybroker, llmgw, pagerlens, shopfront, trustdesk, identity, citypulse, all). To edit a workload, change the
 # file under examples/live (it is mounted read-only), or point WORKLOADS_DIR at your own folder. Credentials come only from the
 # environment: they are passed through by name and never written into an image or a file.
 x-headless: &headless
@@ -47,6 +47,10 @@ services:
     <<: *headless
     profiles: [pagerlens, all]
     command: ["cpsim", "workloads", "run", "/workloads/pagerlens.yaml"]
+  shopfront:
+    <<: *headless
+    profiles: [shopfront, all]
+    command: ["cpsim", "workloads", "run", "/workloads/shopfront.yaml"]
   trustdesk:
     <<: *headless
     profiles: [trustdesk, all]

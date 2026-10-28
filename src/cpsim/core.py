@@ -19,6 +19,7 @@ CSRF_HEADER = "x-cpsim-csrf"
 db = Database()
 vault = Vault("CPSIM")
 metrics = metrics_mod.Metrics(APP, __version__)
+metrics.add_insights_collector(lambda: db.connect(retries=1))     # db_insights_* gauges (EDB query statistics, cached; 0 on plain Postgres)
 
 ALL = frozenset({"*"})
 PERMISSIONS = {

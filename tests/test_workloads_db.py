@@ -95,7 +95,7 @@ def test_validation_over_the_api(client):
     assert client.post("/api/workloads/ghost/start", headers=admin).status_code == 404
     assert client.post("/api/workloads/ghost/run-once", headers=admin).status_code == 404
     cat = client.get("/api/workloads/catalog", headers=admin).json()
-    assert {k["key"] for k in cat["kinds"]} == {"paybroker", "llmgw", "pagerlens", "trustdesk", "identity"}
+    assert {k["key"] for k in cat["kinds"]} == {"paybroker", "llmgw", "pagerlens", "trustdesk", "identity", "shopfront"}
     assert "citypulse" in cat["managed_elsewhere"] and cat["limits"] == {"interval": [0.2, 3600.0], "batch": 500, "max_rate": 200.0}
     assert client.delete("/api/workloads/shop", headers=admin).status_code == 200
     assert client.get("/api/workloads", headers=admin).json() == []

@@ -284,8 +284,8 @@ def test_every_shipped_example_validates():
     from pathlib import Path
 
     files = sorted((Path(__file__).resolve().parents[1] / "examples/live").glob("*.yaml"))
-    assert {f.stem for f in files} == {"paybroker", "llmgw", "pagerlens", "trustdesk", "identity", "citypulse"}
-    urls = {f"{n}_URL": "https://live.example" for n in ("PAYBROKER", "LLMGW", "PAGERLENS", "TRUSTDESK", "CITYPULSE", "IDENTITY")}
+    assert {f.stem for f in files} == {"paybroker", "llmgw", "pagerlens", "trustdesk", "identity", "citypulse", "shopfront"}
+    urls = {f"{n}_URL": "https://live.example" for n in ("PAYBROKER", "LLMGW", "PAGERLENS", "TRUSTDESK", "CITYPULSE", "IDENTITY", "SHOPFRONT")}
     for f in files:
         r = cpsim("workloads", "validate", str(f), environ=env(**urls))
         assert r.returncode == 0 and r.stdout.startswith("ok:"), (f.name, r.stderr)

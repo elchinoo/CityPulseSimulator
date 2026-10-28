@@ -24,7 +24,7 @@ Every AgentPG sandbox URL contains its sandbox id, so recreating an app changes 
 name an app of the fleet instead of a URL. The syntax is exactly one of these, as the whole Target URL (nothing before or after it):
 
 ```
-${CITYPULSE_URL}   ${PAYBROKER_URL}   ${TRUSTDESK_URL}   ${PAGERLENS_URL}   ${LLMGW_URL}   ${IDENTITY_URL}
+${CITYPULSE_URL}   ${PAYBROKER_URL}   ${TRUSTDESK_URL}   ${PAGERLENS_URL}   ${LLMGW_URL}   ${IDENTITY_URL}   ${SHOPFRONT_URL}
 ```
 
 Any other name (`${HOME}`, `${DATABASE_URL}`), a default (`${X:-...}`), a prefix or suffix (`https://${X}`, `${X}/api`) or a nested one is refused
@@ -33,13 +33,13 @@ Any other name (`${HOME}`, `${DATABASE_URL}`), a default (`${X:-...}`), a prefix
 (`ecoctl apply` does that; see its `uses:` list), everything follows without a single edit. A reference that cannot be resolved fails
 the start with `CITYPULSE_URL is not set on this app; set the URL by hand or deploy it with ecoctl`.
 
-The URL rules apply to the **resolved** address: https, or http for this machine (workloads also honour `CPSIM_ALLOW_HTTP_TARGETS`), no
+The URL rules apply to the **resolved** address: https, or http for this machine (workloads and the PagerLens self-report also honour `CPSIM_ALLOW_HTTP_TARGETS`), no
 credentials, no link-local; the credential is only ever sent to that address. Literal URLs saved before keep working unchanged.
 
 Where it shows: every city, company and workload in the API has a read-only `target` object next to `target_url`
 (`{reference, resolved_url, resolves, problem}`; a PUT ignores it, so a GET can be sent back); the tables show `${CITYPULSE_URL} → https://...`;
 next to the Target URL field a **Use the fleet's CityPulse** (PayBroker, TrustDesk, PagerLens, LLM gateway, identity provider) button puts the
-reference in, and Settings has a read-only **Fleet** card (`GET /api/fleet`) listing which of the six variables are set and their values (URLs, not secrets).
+reference in, and Settings has a read-only **Fleet** card (`GET /api/fleet`) listing which of the seven variables are set and their values (URLs, not secrets).
 Generated cities (the form, `POST /api/cities/generate`, `cpsim cities generate`), the fixed presets and the Live feed preset default to
 `${CITYPULSE_URL}` when that variable is set on the app (else empty, as before; pass `target_url: ""` to force empty).
 
@@ -173,8 +173,9 @@ ranges (`198.51.100.0/24`, `203.0.113.0/24`, `192.0.2.0/24`), test cards only. I
 | Kind | Target | Credential (default variable) | What a tick sends |
 |---|---|---|---|
 | `paybroker` | PayBroker `/v1` | merchant **secret** key (`PAYBROKER_SECRET_KEY`); optional publishable key variable (`publishable_env`) | `batch` payments in the `mix`, plus follow-ups |
-| `llmgw` | LLM gateway `/v1/chat/completions`, `/v1/embeddings` | client key `lg_...` (`LLMGW_CLIENT_KEY`), else a service token with scope `llmgw.use` | `batch` chat or embedding calls |
+| `llmgw` | LLM gateway `/v1/chat/completions`, `/v1/embeddings` | client key `lg_...` (`LLMGW_CLIENT_KEY`, then `LLM_API_KEY` as injected by ecoctl for `llm: true`), else a service token with scope `llmgw.use` | `batch` chat or embedding calls |
 | `pagerlens` | PagerLens `/api/ingest/*` | ingest token (`PAGERLENS_TOKEN`), else a service token with scope `pagerlens.ingest` | metrics and logs of a fictional shop, deploys, alerts, with failure injection |
+| `shopfront` | ShopFront storefront API `/api/v1` | service token (`SHOPFRONT_TOKEN`, scope `shop`), else scope `shopfront.api`; none: guest shoppers | `batch` shopper sessions: browse, search, cart, checkout |
 | `trustdesk` | TrustDesk client API, through a company | the company's own variable (`TRUSTDESK_CLIENT_TOKEN`), else scope `trustdesk.requests.write` | one run of a company per tick |
 | `identity` | the identity provider | the simulator's service client (`CPSIM_SERVICE_CLIENT_ID` / `_SECRET`) | token, discovery and JWKS calls (a load/health probe) |
 | `citypulse` | CityPulse | cities (see below) | a reading from every sensor each interval |
@@ -197,8 +198,26 @@ not errors.**
 
 **`llmgw`**: `chat_models`, `embedding_models` (the gateway's aliases; `echo-chat` and `echo-embed` exist on a fresh gateway), `chat_pct`,
 `max_tokens_min`/`max_tokens_max`, `embed_inputs`, `temperature`, `seed`. Prompts rotate over generic text about fictional topics. `429
-budget_exceeded` and `rate_limit_exceeded` are counted as outcome classes of their own (expected), and the loop backs off. The gateway needs a
-registered client named like the service client id when a service token is used.
+budget_exceeded` and `rate_limit_exceeded` are counted as outcome classes of their own (expected), and the loop backs off.
+
+**How the gateway recognises this workload** (read from the gateway's code, `data_client`): a client key `lg_...` identifies the client it was issued to. A service
+token (scope `llmgw.use`) is matched by its client id against the **name** of a registered gateway client, so the service-token route needs a client named exactly
+`cpsim-service` (`CPSIM_SERVICE_CLIENT_ID`) at the gateway; nothing creates it for you. Under ecoctl, give the simulator `llm: true`: ecoctl then creates the gateway client
+`cpsim` (allowed the aliases `chat-default` and `embed-default`) and injects `LLM_API_KEY`, `LLM_CHAT_MODEL` and `EMBEDDING_MODEL`. The workload uses `LLMGW_CLIENT_KEY`,
+then `LLM_API_KEY`, before any service token, and its default aliases are `LLM_CHAT_MODEL` / `EMBEDDING_MODEL` when set (else `echo-chat` / `echo-embed`), so it works with
+the client ecoctl creates and no hand registration. A client may only use its own aliases: a request for another one is `client_error` (`model_not_allowed`).
+
+**`shopfront`**: simulated shoppers on ShopFront's storefront API (`/api/v1`). Each item is one **shopper session** of several calls (so `batch / interval` is sessions per
+second, and the request rate is several times that). `mix` is the share of `browse` (categories, a product list, maybe a search, product pages, then leaves; default 55), `abandon` (also
+fills a cart, default 25) and `buy` (checks out, default 20). `search_pct` (the shop allows 60 searches a minute per address), `max_lines` and `max_qty` shape the baskets; half of the carts are
+server-side (`X-Cart-Token`), half are sent inline with the checkout. Buyers pay with a fresh test card from the reserved `999999` range, tokenized the way the shop's browser does it: the
+publishable key the shop publishes in `/api/v1/config` goes to PayBroker's `/v1/vault/tokens` (address: `paybroker_url`, which may be `${PAYBROKER_URL}`, else the one the shop publishes; the
+URL rules apply), and only the token goes to the shop. `decline_pct`, `three_ds_pct` and `connector_failure_pct` of the buyers use the reserved behaviour prefixes (a PayBroker that maps them,
+see `paybroker`); 3-D Secure challenges are completed (`complete_3ds_pct`) on PayBroker's test page and the order is then asked where it stands. With a **service token** the checkout states the
+customer's address and account age and is exempt from the shop's per-address limit; without one (or with `guest: true`) the shoppers are guests: no `client` data and the shop's limit of 20
+checkouts per 10 minutes per address applies (`rate_limited`, the loop backs off). Outcomes: `browsed`, `abandoned`, `approved`, `declined`, `fraud_declined`, `approved_3ds`, `failed_3ds`,
+`payment_unavailable`, `pending`, `out_of_stock`, `checkout_skipped` (the shop has no PayBroker connection: shoppers still browse and fill carts), `rate_limited` and the error classes. All
+of these except the error classes are expected results. Latency is per session.
 
 **`pagerlens`**: a fictional shop (`web` -> `checkout`, `catalog`; `checkout` -> `payments`, `db`; ...) named with `prefix` (default `sim-`).
 Each tick sends one metrics call and one logs call (`batch` log events) per reporting service; the services, their dependencies and a baseline
@@ -356,7 +375,7 @@ city page shows each endpoint). Endpoints bind to loopback unless you tick *Let 
 | `CPSIM_METRICS_TOKEN` | Lets `/metrics` be scraped with a token that can read nothing else. |
 | `CPSIM_API_KEY` | Optional static full-access key for automation. API tokens (read, metrics or full) can also be created under Settings. |
 | `PAGERLENS_URL`, `PAGERLENS_TOKEN` | Report to PagerLens (an ingest token from PagerLens). https required unless localhost. |
-| `PAYBROKER_SECRET_KEY`, `LLMGW_CLIENT_KEY`, `PAGERLENS_TOKEN` (or the variable a workload names in `token_env`) | Credentials for workloads. Also read from `<NAME>_FILE`, or saved under Settings > Credentials. **Never stored in the workload itself.** A name must contain `TOKEN`, `KEY` or `SECRET` and may not be one of the simulator's own (`CPSIM_*`) or the database's. |
+| `PAYBROKER_SECRET_KEY`, `LLMGW_CLIENT_KEY` (else `LLM_API_KEY`), `PAGERLENS_TOKEN`, `SHOPFRONT_TOKEN` (or the variable a workload names in `token_env`) | Credentials for workloads. Also read from `<NAME>_FILE`, or saved under Settings > Credentials. **Never stored in the workload itself.** A name must contain `TOKEN`, `KEY` or `SECRET` and may not be one of the simulator's own (`CPSIM_*`) or the database's. |
 | `CPSIM_ENCRYPTION_KEY[_FILE]` | Platform secret that unlocks the credential store at start, so credentials saved under Settings > Credentials survive a restart. Without it nothing can be saved. |
 | `CPSIM_MAX_RATE` | Ceiling on items per second, per workload and for all running workloads together (default 200). |
 | `CPSIM_RESUME_ON_START` | Default of the *Resume what was running when the app restarts* switch (on unless `false`); the switch under Settings overrides it. See *Resuming after a restart*. |
@@ -416,15 +435,22 @@ short-lived token from the identity provider instead. A static token always wins
 
 Register `cpsim-service` as a `service` client allowed to call the apps `citypulse`, `trustdesk`, `pagerlens` and `llmgw`. The simulator keeps
 one token source per callee and asks each only for its own scope: `citypulse.ingest`, `trustdesk.requests.write`, `pagerlens.ingest`, `llmgw.use` (the gateway also needs a
-registered client named `cpsim-service`). PayBroker takes merchant keys, not identity tokens.
+registered client named `cpsim-service`, unless the simulator has `llm: true` and uses `LLM_API_KEY`, see `llmgw`). PayBroker takes merchant keys, not identity tokens.
 There is no per-city or per-company switch: the minted token is used exactly when the named variable is empty.
+
+## Resetting the admin password
+
+`cpsim reset-admin` forgets the admin password so the first-run setup can run again (restart for a new code). The vault is reset with it, so the credentials saved under Settings > Credentials could
+never be read again: the command **names them, says they will be deleted, and asks you to type `delete credentials`** (`--yes` skips the question; with no saved credential it asks nothing).
+Anything else cancels and changes nothing. To keep them, change the password under Settings > Admin password instead. Save the credentials again afterwards, or use environment variables.
 
 ## Monitored by PagerLens
 
 Either run `pagerlens-agent` against `/healthz` and `/metrics` (create a scrape token: `CPSIM_METRICS_TOKEN`), or set
 `PAGERLENS_URL`/`PAGERLENS_TOKEN` (or the service client above) and the simulator pushes `up`, `request_rate` (readings delivered per second) and
 `error_rate` (failed deliveries) for the service `citypulse-simulator`, which *depends on* `citypulse-ingest`, and raises
-`SimulatorCannotReachCityPulse` when delivery keeps failing. `/metrics` also has `cpsim_*` series per city and protocol.
+`SimulatorCannotReachCityPulse` when delivery keeps failing. The self-report follows the same URL rules as a workload's target: `https`, or `http` for this machine, or `http` to another
+host only with `CPSIM_ALLOW_HTTP_TARGETS=true` (for a local stand-in reached by name). `/metrics` also has `cpsim_*` series per city and protocol.
 
 ## Deploy on AgentPG
 
@@ -449,7 +475,7 @@ pip install -e ".[dev]" && ruff check src tests && pytest -q          # database
 make up && make test-db                                                  # all of them, on a throwaway database in the compose Postgres
 ```
 
-(The kit, `agentpg-kit`, is installed from the sibling checkout with `uv`, or `pip install "agentpg-kit @ https://github.com/elchinoo/agentpg-kit/archive/refs/tags/v0.2.0.tar.gz"`.)
+(The kit, `agentpg-kit` 0.2.5 or newer, is installed from the sibling checkout with `uv`, or `pip install "agentpg-kit @ https://github.com/elchinoo/agentpg-kit/archive/refs/tags/v0.2.5.tar.gz"`.)
 
 Workloads are covered by schedule maths on a fake clock (drift, jitter bounds, skipped ticks, duration and total stops, backoff), every generator checked against the target's own request rules
 (PayBroker's models and the gateway's validator are loaded from the sibling checkouts when present), outcome classification, mock-transport senders, secrets never stored or echoed, the web API per role and scope,
@@ -471,6 +497,11 @@ The demo-city generator is tested for determinism, variability (districts, types
 * Rate limiting of failed sign-ins is in memory, per process. Sessions live in Postgres and survive a restart.
 
 Licensed under Apache-2.0. See [SECURITY.md](SECURITY.md).
+
+## Documentation
+
+* [docs/GUIDE.md](docs/GUIDE.md): the complete guide (ecosystem fit, architecture, install, configuration reference, operations, troubleshooting), including the **Database** insights tab ([8.9](docs/GUIDE.md#89-database-insights-database-tab)), what a read-only user or AgentPG's restricted MCP can see ([8.10](docs/GUIDE.md#810-what-a-read-only-database-user-and-agentpgs-restricted-mcp-can-see)) and the EDB and AgentPG capabilities used.
+* [docs/VIDEO-SCRIPT.md](docs/VIDEO-SCRIPT.md): script for a 6 minute tutorial video, with recording notes.
 
 ## Credentials saved in the app
 

@@ -10,13 +10,13 @@ import re
 
 from .errors import SpecError
 
-FLEET_VARS = ("CITYPULSE_URL", "PAYBROKER_URL", "TRUSTDESK_URL", "PAGERLENS_URL", "LLMGW_URL", "IDENTITY_URL")
+FLEET_VARS = ("CITYPULSE_URL", "PAYBROKER_URL", "TRUSTDESK_URL", "PAGERLENS_URL", "LLMGW_URL", "IDENTITY_URL", "SHOPFRONT_URL")
 LABELS = {"CITYPULSE_URL": "CityPulse", "PAYBROKER_URL": "PayBroker", "TRUSTDESK_URL": "TrustDesk", "PAGERLENS_URL": "PagerLens",
-          "LLMGW_URL": "LLM gateway", "IDENTITY_URL": "identity provider"}
+          "LLMGW_URL": "LLM gateway", "IDENTITY_URL": "identity provider", "SHOPFRONT_URL": "ShopFront"}
 # the reference each kind of target offers as a one-click choice
 CITY_VAR, COMPANY_VAR = "CITYPULSE_URL", "TRUSTDESK_URL"
 KIND_VARS = {"paybroker": "PAYBROKER_URL", "llmgw": "LLMGW_URL", "pagerlens": "PAGERLENS_URL", "trustdesk": "TRUSTDESK_URL",
-             "identity": "IDENTITY_URL"}
+             "identity": "IDENTITY_URL", "shopfront": "SHOPFRONT_URL"}
 EXACT = re.compile(r"^\$\{([A-Z][A-Z0-9_]*)\}$")
 
 

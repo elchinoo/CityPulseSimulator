@@ -5,10 +5,11 @@ import { initProtocols } from "/static/protocols.js";
 import { initWorkloads, stopWorkloads } from "/static/workloads.js";
 import { bootSession, can, renderLogin, renderSetup, state } from "/kit/session.js";
 import { initSettings } from "/static/settings.js";
+import { initInsights } from "/kit/insights.js";
 import { $, h } from "/kit/ui.js";
 
-const TABS = ["cities", "companies", "workloads", "protocols", "settings"];
-const INIT = { cities: initCities, companies: initCompanies, workloads: initWorkloads, protocols: initProtocols, settings: initSettings };
+const TABS = ["cities", "companies", "workloads", "protocols", "settings", "database"];
+const INIT = { cities: initCities, companies: initCompanies, workloads: initWorkloads, protocols: initProtocols, settings: initSettings, database: () => initInsights($("view-database"), api) };
 const SECTIONS = ["auth-card", "nav", "signout", ...TABS.map((t) => "view-" + t)];
 
 function hideAll() { for (const id of SECTIONS) $(id).hidden = true; }
@@ -33,7 +34,7 @@ async function boot(notice = "") {
 }
 
 // What each tab needs (the server enforces it; this only hides what would be refused). Protocols is plain documentation.
-const NEEDS = { cities: "sim:read", companies: "sim:read", workloads: "sim:read", protocols: null, settings: "settings:manage" };
+const NEEDS = { cities: "sim:read", companies: "sim:read", workloads: "sim:read", protocols: null, settings: "settings:manage", database: "settings:manage" };
 const allowed = (t) => !NEEDS[t] || can(NEEDS[t]);
 
 function showApp() {

@@ -97,3 +97,42 @@ def test_delete_removes_it_and_a_workload_then_fails_with_a_clear_message(client
     client.put("/api/workloads/shop", headers=admin, json=SPEC)
     r = client.post("/api/workloads/shop/run-once", headers=admin)
     assert r.status_code >= 400 and "Settings > Credentials" in r.text
+
+
+def test_reset_admin_names_and_deletes_the_credentials_the_vault_reset_makes_unreadable(client, monkeypatch, capsys):
+    from cpsim import cli
+
+    admin = {**who("admin"), **CSRF}
+    client.put("/api/credentials/PAYBROKER_SECRET_KEY", headers=admin, json={"value": KEY})
+    client.put("/api/credentials/LLMGW_CLIENT_KEY", headers=admin, json={"value": "lg_x"})
+
+    def rows(conn):
+        return sorted(r["name"] for r in conn.execute("SELECT name FROM cpsim_credential").fetchall())
+    with db.connect() as conn:
+        assert cli.reset_admin(conn, ask=lambda _: "no") is False                # not the phrase: nothing changes
+        assert rows(conn) == ["LLMGW_CLIENT_KEY", "PAYBROKER_SECRET_KEY"] and core.vault.is_initialized(conn)
+        out = capsys.readouterr().out
+        assert "LLMGW_CLIENT_KEY, PAYBROKER_SECRET_KEY" in out and "DELETED" in out and "Cancelled" in out
+        assert KEY not in out
+
+        def eof(_):
+            raise EOFError
+        assert cli.reset_admin(conn, ask=eof) is False                           # no terminal: refuse rather than guess
+        assert cli.reset_admin(conn, ask=lambda _: cli.CONFIRM_DELETE) is True
+        assert rows(conn) == [] and not core.vault.is_initialized(conn)
+        assert "2 saved credential(s) deleted" in capsys.readouterr().out
+
+
+def test_reset_admin_with_no_saved_credentials_asks_nothing_and_yes_skips_the_question(client, capsys):
+    from cpsim import cli
+
+    def never(_):
+        raise AssertionError("must not ask")
+    with db.connect() as conn:
+        assert cli.reset_admin(conn, ask=never) is True
+        assert "deleted" not in capsys.readouterr().out
+    admin = {**who("admin"), **CSRF}
+    client.put("/api/credentials/PAYBROKER_SECRET_KEY", headers=admin, json={"value": KEY})
+    with db.connect() as conn:
+        assert cli.reset_admin(conn, assume_yes=True, ask=never) is True
+        assert conn.execute("SELECT count(*) AS n FROM cpsim_credential").fetchone()["n"] == 0

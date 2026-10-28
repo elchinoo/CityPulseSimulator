@@ -80,7 +80,7 @@ def test_fleet_card_catalogs_and_the_generator_default(client, monkeypatch):  # 
     assert [v["name"] for v in client.get("/api/hr/catalog", headers=admin).json()["fleet"]] == list(FLEET_VARS)
     wc = client.get("/api/workloads/catalog", headers=admin).json()
     assert wc["kind_vars"] == {"paybroker": "PAYBROKER_URL", "llmgw": "LLMGW_URL", "pagerlens": "PAGERLENS_URL", "trustdesk": "TRUSTDESK_URL",
-                               "identity": "IDENTITY_URL"} and len(wc["fleet"]) == 6
+                               "identity": "IDENTITY_URL", "shopfront": "SHOPFRONT_URL"} and len(wc["fleet"]) == 7
     made = client.post("/api/cities/generate", headers=admin, json={"count": 2, "size": "small", "seed": 4}).json()
     for c in made["cities"]:
         assert client.get(f"/api/cities/{c['name']}", headers=admin).json()["target_url"] == "${CITYPULSE_URL}"

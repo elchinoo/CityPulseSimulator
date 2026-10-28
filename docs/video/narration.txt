@@ -1,0 +1,124 @@
+## 1 af_sarah
+This is the CityPulse Simulator.
+
+It builds a whole smart city out of nothing. It invents thousands of sensors, and sends their readings the way a real plant would.
+
+It can also push payments, model calls and employee requests at the other apps of our showcase.
+
+In the next six minutes, you will start it, run a city, and break that city on purpose. Then we will see how it connects to everything else.
+
+## 2 af_sarah
+The simulator is one small web app on top of Postgres. When it starts for the first time, it prints a one-time setup code. Here it is, in the terminal.
+
+Nobody can use the app without that code. So a new install is never open by accident.
+
+In the browser, we type the code, and choose an admin password. Create it, and we are in.
+
+In the real fleet, people sign in through the shared identity provider instead. The roles are admin, operator and viewer.
+
+## 3 am_michael
+Let's build a city. In this app, a city is simply a list of sensor groups. We name it demo city, and pick the fixed preset, which is always the same.
+
+Each group says what kind of sensor, how many, and in which district. It also says how often they report, and how they talk.
+
+That last part is the protocol: the language the device speaks to the gateway. Modbus, EtherNet IP and EtherCAT are languages of factories and utilities. So are Profinet and Profibus. Direct skips them.
+
+The last column is the burst percentage. It says how likely a sensor is to misbehave.
+
+This preset has one hundred seventy four sensors, and it is the same every time.
+
+If you want cities that differ, the city generator makes ten at a time. The same seed always gives the same city.
+
+Cities can have up to ten thousand sensors. That is how you load test the whole chain.
+
+## 4 am_michael
+Click Start city, and the city comes alive. Each protocol gets a real server on this machine.
+
+A gateway polls them, and turns the changes into readings. Just as an edge box would in a plant.
+
+Sensors report every ten to fifteen seconds. Until the first one has, the Modbus registers stay at zero. So let's give it a moment, and watch the readings sent counter.
+[pause 9]
+There it goes. Now for the proof.
+
+Here is an ordinary third party Modbus client, asking that server for its registers. And it answers with numbers.
+
+Six registers make two channels. Each has a value, and an update counter.
+
+Because no CityPulse address is set, the readings are counted, but not sent anywhere.
+
+With an address, the same readings go to CityPulse over HTTPS, in batches. There is a retry buffer, if CityPulse is slow. If it pushes back, the city waits and tries again.
+
+And if the token is refused, the page says so in plain words.
+
+## 5 af_heart
+Next, a city that misbehaves. Real cities have bad days. A burst is a random episode, where a sensor misbehaves.
+
+We turn the whole city up for one minute, and press burst.
+[pause 4]
+Now look at the behaviour card. Bursts active fills up. Corrupt values and silent updates start to rise.
+
+The episodes are a wild spike, extra noise, a stuck value, or a sensor that goes silent. Others flood, or send garbage.
+
+Each group's burst percentage sets how often it happens. This button turns the whole city up at once.
+
+So later, the monitoring apps have something real to notice. And if you give the city a seed, even the chaos repeats exactly.
+
+## 6 af_heart
+Cities cover the sensors. Workloads cover everything else. A workload sends simulated traffic to one app, on a schedule you choose.
+
+First we stop the city, and open the workloads tab.
+
+We create a workload called shop telemetry, of kind PagerLens telemetry. It plays a small online shop, reporting to PagerLens, our incident tool.
+
+We pick the healthy baseline, every five seconds, then save and start.
+[pause 5]
+The blue banner says generate only. With no address, it only generates, so this is safe to try.
+
+Now the interesting part. We pick the bad deploy scenario, and switch.
+
+With a real PagerLens set, the shop now fails on purpose. Errors and slowness, so an incident opens on the other side.
+
+There are also workloads for PayBroker payments, ShopFront shoppers and the LLM gateway. And for TrustDesk, and the identity provider.
+
+A schedule is paced against a steady clock. So a slow target makes ticks skip, instead of piling up. And a hard rate ceiling keeps the simulator from flooding anything by mistake.
+
+## 7 am_eric
+Now, a different kind of traffic: a simulated company. A company is a simulated employer for TrustDesk.
+
+It invents employees, new hires and long-serving staff. And it sends requests of each type: vacations, sick leave and expenses.
+
+We stop the workload, name the company acme, and choose the quick check.
+
+Then we press preview. Preview shows exactly what would be sent. It is decided from a seed, and it sends nothing.
+
+A quarter of the requests are built to break a typical policy. Too little notice, or no receipt, for example. So TrustDesk has something to judge.
+
+Every name is invented, on example dot com.
+
+## 8 am_eric
+Last, the settings tab. In the fleet, you never type app addresses in.
+
+ecoctl gives the simulator the seven app addresses. A target is looked up each time something starts. So a recreated app is followed automatically.
+
+Here on a laptop, they all say not set.
+
+Credentials are saved encrypted, and never shown again. Nothing secret is ever stored inside a city or a workload.
+
+The app also remembers what was running, so a restart brings everything back.
+
+For monitoring, it answers health checks, and Prometheus metrics. Let's ask it, from the terminal.
+[pause 1]
+The metrics show zero workloads running, because we stopped it. And the health check says okay. It also reports its own health to PagerLens.
+
+Three roles control who can do what. Viewers only look. Operators run and edit simulations. Administrators also manage credentials and tokens.
+
+## 9 af_bella
+Let's wrap up what the CityPulse Simulator does.
+
+It builds cities of sensors that speak real industrial protocols. It bursts them on demand. It runs scheduled traffic for the other apps. And it sends simulated employee requests to TrustDesk.
+
+All of it comes from one app, with roles, a vault and metrics. It needs only Postgres. And the same files run headless, with no database at all.
+
+Start with the guide, in the docs folder. Run it locally in five minutes. Then point it at the fleet, and watch the other apps come alive.
+
+Thanks for watching.

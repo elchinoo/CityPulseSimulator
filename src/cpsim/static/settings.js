@@ -79,7 +79,7 @@ function credentialsCard() {
     note, box];
 }
 
-// Read-only: the six addresses ecoctl (or the person who deployed this app) gave it. A city, company or workload can follow them.
+// Read-only: the seven addresses ecoctl (or the person who deployed this app) gave it. A city, company or workload can follow them.
 function fleetCard() {
   const box = h("div", {});
   api("/api/fleet").then((d) => {

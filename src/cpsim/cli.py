@@ -263,6 +263,36 @@ def _generate_cities(args) -> int:
     return 0
 
 
+CONFIRM_DELETE = "delete credentials"
+
+
+def reset_admin(conn, assume_yes: bool = False, ask=input) -> bool:
+    """Forget the admin password. The kit resets the vault with it (the data key and every wrapping of it), so the credentials saved
+    under Settings > Credentials would stay in the database as ciphertext nobody can read. Name them, ask for confirmation (typing
+    `delete credentials`; `--yes` skips it), delete them with the reset. False (nothing changed) when the answer is not the phrase."""
+    from . import auth, credentials
+
+    names = sorted(credentials.saved_names(conn))
+    if names:
+        print(f"Resetting the admin password also resets the vault, so the {len(names)} saved credential(s) become unreadable "
+              f"and will be DELETED: {', '.join(names)}.\nSave them again afterwards (Settings > Credentials), or set the environment "
+              "variables they stand for. To keep them, cancel and change the password under Settings > Admin password instead.")
+        if not assume_yes:
+            try:
+                answer = ask(f'Type "{CONFIRM_DELETE}" to continue: ').strip()
+            except EOFError:
+                answer = ""
+            if answer != CONFIRM_DELETE:
+                print("Cancelled: nothing was changed.")
+                return False
+        conn.execute("DELETE FROM cpsim_credential")
+    auth.reset_admin(conn)
+    conn.commit()
+    print("Admin password cleared" + (f" and {len(names)} saved credential(s) deleted" if names else "")
+          + ". Restart the app; it prints a new setup code.")
+    return True
+
+
 def main(argv: list[str] | None = None) -> None:
     p = argparse.ArgumentParser(prog="cpsim", description="CityPulse Simulator: cities of simulated sensors speaking industrial protocols.")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -305,7 +335,9 @@ def main(argv: list[str] | None = None) -> None:
     sub.add_parser("migrate", help="apply the SQL migrations (serve does this at start)")
     imp = sub.add_parser("import-files", help="one-shot upgrade: load cities and companies saved by the first release's file store")
     imp.add_argument("directory", help="the old CPSIM_DATA_DIR (holds state.json)")
-    sub.add_parser("reset-admin", help="forget the admin password so setup can run again")
+    ra = sub.add_parser("reset-admin", help="forget the admin password so setup can run again (also deletes saved credentials: they cannot "
+                        "be read after the vault is reset)")
+    ra.add_argument("--yes", action="store_true", help="do not ask before deleting the saved credentials")
     args = p.parse_args(argv)
     try:
         if args.cmd == "serve":
@@ -360,12 +392,11 @@ def main(argv: list[str] | None = None) -> None:
             print(f"imported {done['cities']} cities and {done['companies']} companies; {done['skipped']} skipped (invalid); "
                   f"admin password {'imported' if done['admin_password'] else 'left as it is'}")
         elif args.cmd == "reset-admin":
-            from . import auth
             from .core import db
 
             with db.connect() as conn:
-                auth.reset_admin(conn)
-            print("Admin password cleared. Restart the app; it prints a new setup code.")
+                if not reset_admin(conn, assume_yes=args.yes):
+                    sys.exit(EXIT_MISCONFIGURED)
     except model.SpecError as exc:
         print(f"invalid: {exc}", file=sys.stderr)
         sys.exit(EXIT_MISCONFIGURED)

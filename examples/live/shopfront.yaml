@@ -1,0 +1,21 @@
+# Simulated shoppers for ShopFront: browse and search, fill a cart, check out with a PayBroker test card.
+#   cpsim workloads run examples/live/shopfront.yaml
+# SHOPFRONT_URL and a service token in SHOPFRONT_TOKEN (shopfront create-token --scope shop), or a service token with scope shopfront.api.
+# With neither (or guest: true) the shoppers are guests: the shop limits them to 20 checkouts per 10 minutes per address.
+# The shop must be connected to PayBroker for the buyers to pay; otherwise they only browse and fill carts (outcome checkout_skipped).
+workloads:
+  - name: shoppers
+    kind: shopfront
+    target_url: ${SHOPFRONT_URL}
+    token_env: SHOPFRONT_TOKEN
+    params:
+      mix: {browse: 55, abandon: 25, buy: 20}   # shares of the sessions (weights)
+      search_pct: 40
+      decline_pct: 8                            # of the buyers; needs a PayBroker that maps the reserved test prefixes
+      three_ds_pct: 6
+      complete_3ds_pct: 80
+      max_lines: 3
+    schedule:
+      interval: 2
+      batch: 2                                  # shopper sessions per tick
+      concurrency: 4

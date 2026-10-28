@@ -9,8 +9,8 @@ from dataclasses import dataclass, field
 
 from .. import credentials
 from ..model import SpecError
-from ..tokens import LLMGW_USE, PAGERLENS_INGEST, outbound_token
-from . import identity, llmgw, pagerlens, paybroker, trustdesk
+from ..tokens import LLMGW_USE, PAGERLENS_INGEST, SHOPFRONT_API, outbound_token
+from . import identity, llmgw, pagerlens, paybroker, shopfront, trustdesk
 from .base import Http
 
 
@@ -26,6 +26,8 @@ class Kind:
     validate: Callable[[dict], dict]
     token_env: str = ""                  # the default variable that holds the credential ("" when the kind needs none)
     scope: str | None = None             # the identity provider scope used when that variable is empty
+    token_optional: bool = False         # no credential at all is fine (the kind then runs without one)
+    fallback_env: str = ""               # a second variable tried when the default one is empty (what `ecoctl` injects for `llm: true`)
     min_interval: float = 0.2
     max_batch: int = 500
     schedule: dict = field(default_factory=dict)      # defaults offered for a new workload
@@ -68,10 +70,11 @@ KINDS: dict[str, Kind] = {k.name: k for k in (
                    "params": {"mix": {"regular": 30, "decline": 5, "three_ds": 0, "connector_failure": 0, "card_testing": 45,
                                       "account_takeover": 20}}}]),
     Kind("llmgw", "LLM gateway calls", "Chat and embedding calls through the LLM gateway's data plane, with rotating synthetic prompts.",
-         llmgw.validate, "LLMGW_CLIENT_KEY", LLMGW_USE, schedule={"interval": 5, "batch": 2, "concurrency": 2},
-         url_hint="https://your-llm-gateway", env_hint="A client key (lg_...). When empty, a service token with scope llmgw.use is used.",
-         fields=[_f("chat_models", "Chat model aliases", "list", "Comma separated; the gateway's aliases (echo-chat works out of the box)."),
-                 _f("embedding_models", "Embedding model aliases", "list", "Comma separated (echo-embed works out of the box)."),
+         llmgw.validate, "LLMGW_CLIENT_KEY", LLMGW_USE, fallback_env="LLM_API_KEY", schedule={"interval": 5, "batch": 2, "concurrency": 2},
+         url_hint="https://your-llm-gateway", env_hint="A client key (lg_...); LLM_API_KEY (what ecoctl injects for `llm: true`) is tried next, then a service token with scope llmgw.use "
+         "(the gateway needs a client named like the service client id).",
+         fields=[_f("chat_models", "Chat model aliases", "list", "Comma separated; the gateway's aliases (default: LLM_CHAT_MODEL when set, else echo-chat)."),
+                 _f("embedding_models", "Embedding model aliases", "list", "Comma separated (default: EMBEDDING_MODEL when set, else echo-embed)."),
                  _f("chat_pct", "Chat share (%)", "number", "The rest are embedding calls.", min=0, max=100),
                  _f("max_tokens_min", "Smallest max_tokens", "number", "", min=1, max=4096),
                  _f("max_tokens_max", "Largest max_tokens", "number", "", min=1, max=4096),
@@ -91,6 +94,28 @@ KINDS: dict[str, Kind] = {k.name: k for k in (
          presets=[{"id": "baseline", "label": "Healthy baseline every 5 s", "schedule": {"interval": 5, "batch": 3}, "params": {}},
                   {"id": "bad-deploy", "label": "Bad deploy of checkout (incident opens)", "schedule": {"interval": 5, "batch": 3},
                    "params": {"scenario": "bad_deploy"}}]),
+    Kind("shopfront", "ShopFront shoppers", "Simulated shoppers on ShopFront's storefront API: browse and search, fill a cart, check out "
+         "with a PayBroker test card. Each item is one shopper session of several calls.", shopfront.validate, "SHOPFRONT_TOKEN",
+         SHOPFRONT_API, token_optional=True, schedule={"interval": 2, "batch": 2, "concurrency": 4}, url_hint="https://your-shopfront",
+         env_hint="A ShopFront service token (scope shop). When empty, a service token with scope shopfront.api is used; with neither, "
+                  "or with Guest on, the shoppers are plain guests (the shop limits guests to 20 checkouts per 10 minutes).",
+         fields=[_f(f"mix.{k}", f"{label} (%)", "number", hint, min=0, max=100) for k, label, hint in (
+                     ("browse", "Browse only", "Look at products and leave."), ("abandon", "Abandon the cart", "Fill a cart and leave."),
+                     ("buy", "Buy", "Check out with a test card."))] + [
+                 _f("search_pct", "Sessions that search (%)", "number", "The shop allows 60 searches a minute per address.", min=0, max=100),
+                 _f("decline_pct", "Buyers with a declined card (%)", "number", "Reserved decline test card.", min=0, max=100),
+                 _f("three_ds_pct", "Buyers with a 3-D Secure card (%)", "number", "Reserved 3-D Secure card; completed on PayBroker's test page.", min=0, max=100),
+                 _f("connector_failure_pct", "Buyers with a connector-failure card (%)", "number", "The first connector fails; the cascade recovers.", min=0, max=100),
+                 _f("complete_3ds_pct", "3-D Secure completed (%)", "number", "Share of challenges completed (succeeded).", min=0, max=100),
+                 _f("max_lines", "Most products per cart", "number", "", min=1, max=5),
+                 _f("max_qty", "Most units per product", "number", "", min=1, max=5),
+                 _f("guest", "Guest shoppers only", "bool", "Never use a token, even if one exists."),
+                 _f("paybroker_url", "PayBroker address for card tokens", "text", "Empty: the address the shop publishes. May be ${PAYBROKER_URL}."),
+                 _f("seed", "Random seed", "number", "Empty: random each run.", min=0)],
+         presets=[{"id": "browsing", "label": "Window shoppers: 2 sessions every 2 s, few buy", "schedule": {"interval": 2, "batch": 2},
+                   "params": {"mix": {"browse": 80, "abandon": 15, "buy": 5}}},
+                  {"id": "rush", "label": "Checkout rush: 3 sessions every 2 s, most buy", "schedule": {"interval": 2, "batch": 3},
+                   "params": {"mix": {"browse": 15, "abandon": 15, "buy": 70}}}]),
     Kind("trustdesk", "TrustDesk recurring requests", "Runs a saved company (its employees and requests) again and again on a schedule.",
          trustdesk.validate, "", min_interval=5.0, max_batch=1, schedule={"interval": 60, "batch": 1, "concurrency": 1},
          env_hint="The company names its own URL and token variable.",
@@ -124,11 +149,18 @@ def credential(wl):
 
     Raises SpecError when the target needs one and neither exists. Returns None for kinds that need no bearer credential."""
     kind = KINDS[wl.kind]
+    if kind.name == "shopfront" and wl.params.get("guest"):
+        return None
     if kind.name == "identity" and wl.target_url and not identity.client_credentials():
         raise SpecError("CPSIM_SERVICE_CLIENT_SECRET is empty: the identity probe needs the simulator's service client")
     if not kind.token_env or not wl.target_url:
         return None
-    token = outbound_token(wl.token_env, kind.scope) if kind.scope else (credentials.get(wl.token_env) or None)
+    static = credentials.get(wl.token_env)
+    if not static and kind.fallback_env and wl.token_env == kind.token_env:
+        static = credentials.get(kind.fallback_env)
+    token = static or (outbound_token(wl.token_env, kind.scope) if kind.scope else None)
+    if not token and kind.token_optional:
+        return None
     if not token:
         extra = (f" (or configure the service client of the identity provider for scope {kind.scope}: see CPSIM_SERVICE_CLIENT_SECRET)"
                  if kind.scope else "")
@@ -153,6 +185,9 @@ def build_sender(wl, *, token=None, transport=None, rng: random.Random | None = 
         return paybroker.PaybrokerSender(params, http, rng, rate=wl.schedule.rate(), publishable_http=pub)
     if wl.kind == "llmgw":
         return llmgw.LlmgwSender(params, http, rng)
+    if wl.kind == "shopfront":
+        from ..wl_model import allow_http_targets  # not at import time: wl_model reaches the kinds
+        return shopfront.ShopfrontSender(params, http, rng, service=token is not None, transport=transport, allow_http=allow_http_targets())
     if wl.kind == "pagerlens":
         return pagerlens.PagerlensSender(params, http, rng)
     if wl.kind == "identity":

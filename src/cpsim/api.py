@@ -5,6 +5,7 @@ from datetime import date
 from pathlib import Path
 
 import psycopg
+from apgkit import insights
 from apgkit.auth.rp import safe_return_to
 from apgkit.config import env_bool
 from apgkit.guard import SecurityGuard
@@ -348,7 +349,7 @@ def _credential_users() -> dict[str, list[str]]:
 
 @app.get("/api/fleet", dependencies=[Depends(require("sim:read"))])
 def fleet_status():
-    """The six fleet addresses this app was given (by ecoctl, or by hand). URLs are not secrets."""
+    """The seven fleet addresses this app was given (by ecoctl, or by hand). URLs are not secrets."""
     return {"vars": fleet.status()}
 
 
@@ -358,6 +359,15 @@ class RunSettingsBody(BaseModel):
 
 def _run_settings() -> dict:
     return {"resume_on_start": runtime.resume_enabled(), "default": resume_default(), "stagger_seconds": resume_stagger()}
+
+
+@app.get("/api/insights", dependencies=[Depends(require("settings:manage"))])
+def database_insights(order: str = "total", limit: int = 20):
+    """EDB's query statistics, tuner and index advisor for this app's own database ("not available" on plain Postgres). Admin only:
+    statement text shows table names and the shape of the workload."""
+    order = order if order in ("total", "mean", "calls") else "total"
+    with core.db.connect(retries=1) as conn:
+        return insights.insights_payload(conn, order, max(1, min(limit, 200)))
 
 
 @app.get("/api/run-settings", dependencies=[Depends(require("settings:manage"))])

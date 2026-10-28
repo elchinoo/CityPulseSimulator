@@ -136,3 +136,22 @@ def test_the_reporter_starts_with_a_minted_pagerlens_token(provider, monkeypatch
     asyncio.run(rep.client.aclose())
     monkeypatch.delenv("CPSIM_SERVICE_CLIENT_SECRET")
     assert reporter.maybe_start(None) is None                   # neither a static token nor a service identity
+
+
+def test_the_self_report_follows_the_workload_rule_for_plain_http(monkeypatch, capsys):
+    monkeypatch.setenv("PAGERLENS_TOKEN", "ingest-token")
+    cases = [("http://localhost:8080", False, True), ("http://127.0.0.1:9", False, True), ("https://pagerlens.example", False, True),
+             ("http://pagerlens:8000", False, False), ("http://localhost.evil.example", False, False),
+             ("http://pagerlens:8000", True, True), ("http://169.254.169.254", True, False), ("http://pagerlens:8000", "off", False)]
+    for url, allow, started in cases:
+        monkeypatch.setenv("PAGERLENS_URL", url)
+        if allow in (True, "on"):
+            monkeypatch.setenv("CPSIM_ALLOW_HTTP_TARGETS", "true")
+        else:
+            monkeypatch.delenv("CPSIM_ALLOW_HTTP_TARGETS", raising=False)
+        rep = reporter.maybe_start(None)
+        assert (rep is not None) is started, (url, allow)
+        if rep:
+            asyncio.run(rep.client.aclose())
+        else:
+            assert "refusing PAGERLENS_URL" in capsys.readouterr().err

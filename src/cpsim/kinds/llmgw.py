@@ -2,10 +2,13 @@
 
 Rotating synthetic prompts (generic text about fictional topics: no personal data), a list of model aliases to rotate through, a
 mix of chat and embedding calls and a range of token sizes. Auth is a client key (`lg_...`, from the environment) or, when none is
-set, a service token from the identity provider with scope `llmgw.use` (the gateway needs a registered client named like the
-service client id). 429 `budget_exceeded` and `rate_limit_exceeded` are EXPECTED outcome classes: they are what a gateway with
+set (`LLMGW_CLIENT_KEY`, else `LLM_API_KEY`, the variable `ecoctl` injects into an app with `llm: true`, whose gateway client is
+named like the app and only allows the aliases `LLM_CHAT_MODEL` and `EMBEDDING_MODEL`, which are therefore the default aliases here),
+a service token from the identity provider with scope `llmgw.use`. The gateway matches that token's client id (`cpsim-service`) against
+the NAME of a registered client, so for this route a client of exactly that name must exist at the gateway. 429 `budget_exceeded` and `rate_limit_exceeded` are EXPECTED outcome classes: they are what a gateway with
 limits is for, and the loop backs off when it sees them.
 """
+import os
 import re
 from dataclasses import dataclass
 
@@ -45,10 +48,16 @@ class EmbedOp:
     body: dict
 
 
+def default_alias(env: str, fallback: str) -> list[str]:
+    """The alias an `llm: true` app is allowed (set by ecoctl in `env`), else the one a fresh gateway has."""
+    value = os.environ.get(env, "").strip()
+    return [value if ALIAS.match(value) else fallback]
+
+
 def validate(params: dict) -> dict:
     unknown_params(params, PARAMS)
-    out = {"chat_models": p_list(params, "chat_models", ["echo-chat"], ALIAS),
-           "embedding_models": p_list(params, "embedding_models", ["echo-embed"], ALIAS),
+    out = {"chat_models": p_list(params, "chat_models", default_alias("LLM_CHAT_MODEL", "echo-chat"), ALIAS),
+           "embedding_models": p_list(params, "embedding_models", default_alias("EMBEDDING_MODEL", "echo-embed"), ALIAS),
            "chat_pct": p_num(params, "chat_pct", 80, 0, 100),
            "max_tokens_min": p_int(params, "max_tokens_min", 16, 1, 4096),
            "max_tokens_max": p_int(params, "max_tokens_max", 128, 1, 4096),

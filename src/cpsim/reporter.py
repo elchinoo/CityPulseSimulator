@@ -12,7 +12,9 @@ import httpx
 
 from . import __version__
 from .config import get_settings
+from .model import SpecError, check_target
 from .tokens import PAGERLENS_INGEST, BearerAuth, outbound_token
+from .wl_model import allow_http_targets
 
 SERVICE, DEPENDS = "citypulse-simulator", "citypulse-ingest"
 INTERVAL, FAIL_AFTER = 15, 45
@@ -72,7 +74,9 @@ def maybe_start(runtime) -> Reporter | None:
     token = cfg.pagerlens_token or outbound_token("PAGERLENS_TOKEN", PAGERLENS_INGEST)
     if not (cfg.pagerlens_url and token):
         return None
-    if cfg.pagerlens_url.startswith("http://") and not any(h in cfg.pagerlens_url for h in ("//localhost", "//127.0.0.1")):
-        print("reporter: refusing to send a token over plain http to a non-local PagerLens", file=sys.stderr)
+    try:       # the rules of a workload's target: https, or http for this machine (or anywhere with CPSIM_ALLOW_HTTP_TARGETS)
+        check_target(cfg.pagerlens_url, allow_http=allow_http_targets())
+    except SpecError as exc:
+        print(f"reporter: refusing PAGERLENS_URL, {exc}", file=sys.stderr)
         return None
     return Reporter(cfg.pagerlens_url, token, runtime)

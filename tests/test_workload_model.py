@@ -121,3 +121,29 @@ def test_an_empty_variable_falls_back_to_a_service_token_with_the_kinds_scope(mo
     assert {k[2] for k in tokens._sources} == {"llmgw.use", "pagerlens.ingest"}
     monkeypatch.setenv("LLMGW_CLIENT_KEY", "lg_static")
     assert kinds.credential(parse_workload({**BASE, "kind": "llmgw"})) == "lg_static", "a static key wins"
+
+
+def test_a_gateway_client_key_from_ecoctl_is_used_before_a_service_token(monkeypatch):
+    """`llm: true` makes ecoctl create a gateway client named after the app and inject LLM_API_KEY (and the two aliases it may use)."""
+    gw = parse_workload({**BASE, "kind": "llmgw"})
+    for v in ("LLMGW_CLIENT_KEY", "LLM_API_KEY", "CPSIM_OIDC_ISSUER"):
+        monkeypatch.delenv(v, raising=False)
+    monkeypatch.setenv("LLM_API_KEY", "lg_from_ecoctl")
+    assert kinds.credential(gw) == "lg_from_ecoctl"
+    monkeypatch.setenv("LLMGW_CLIENT_KEY", "lg_chosen")
+    assert kinds.credential(gw) == "lg_chosen", "the variable the workload names wins"
+    monkeypatch.delenv("LLMGW_CLIENT_KEY")
+    named = parse_workload({**BASE, "kind": "llmgw", "token_env": "MY_GATEWAY_KEY"})
+    with pytest.raises(SpecError, match="MY_GATEWAY_KEY"):
+        kinds.credential(named)         # a workload that names its own variable does not silently use another credential
+
+
+def test_llmgw_aliases_default_to_what_ecoctl_allows_the_client(monkeypatch):
+    assert parse_workload({**BASE, "kind": "llmgw"}).params["chat_models"] == ["echo-chat"]
+    monkeypatch.setenv("LLM_CHAT_MODEL", "chat-default")
+    monkeypatch.setenv("EMBEDDING_MODEL", "embed-default")
+    p = parse_workload({**BASE, "kind": "llmgw"}).params
+    assert p["chat_models"] == ["chat-default"] and p["embedding_models"] == ["embed-default"]
+    assert parse_workload({**BASE, "kind": "llmgw", "params": {"chat_models": ["mine"]}}).params["chat_models"] == ["mine"]
+    monkeypatch.setenv("LLM_CHAT_MODEL", "not a valid alias!")
+    assert parse_workload({**BASE, "kind": "llmgw"}).params["chat_models"] == ["echo-chat"]
