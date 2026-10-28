@@ -24,13 +24,13 @@ def ro(client):  # noqa: F811
     assert client.put("/api/credentials/PAYBROKER_SECRET_KEY", headers={**who("admin"), **CSRF}, json={"value": "sk_test_RO_SENTINEL"}).status_code == 200
     with core.db.connect() as c:
         c.execute("DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='a1p_readonly') THEN CREATE ROLE a1p_readonly NOLOGIN; END IF; END $$")
-        c.execute(f"DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='{LOGIN}') THEN CREATE ROLE {LOGIN} LOGIN; END IF; END $$")
+        c.execute(f"DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='{LOGIN}') THEN CREATE ROLE {LOGIN} LOGIN PASSWORD 'ro-pw-test'; END IF; END $$")
         c.execute(f"GRANT a1p_readonly TO {LOGIN}")
         c.execute("GRANT USAGE ON SCHEMA public TO a1p_readonly")
         c.execute("GRANT SELECT ON ALL TABLES IN SCHEMA public TO a1p_readonly")
         c.commit()
     migrate.run()                                          # the real startup path (`cpsim serve` / `cpsim migrate`)
-    conn = psycopg.connect(make_conninfo(TEST_DATABASE_URL, user=LOGIN), row_factory=dict_row, autocommit=True)
+    conn = psycopg.connect(make_conninfo(TEST_DATABASE_URL, user=LOGIN, password="ro-pw-test"), row_factory=dict_row, autocommit=True)
     yield conn
     conn.close()
 
