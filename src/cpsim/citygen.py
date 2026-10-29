@@ -1,7 +1,11 @@
 """Demo-city generator: seeded variability, so ten cities are never ten copies of one.
 
-Same seed, size and profile give the same city; another seed gives another one. A city makes up 3 to 12 districts of its own (a kind
-such as harbour or industrial and a fictional name such as `alder-quay`, see districts.py: two cities almost never share one),
+Same seed, size and profile give the same city; another seed gives another one. A city called after a bundled real city (`brussels`,
+`vienna`, see realcities.py) has that city's REAL districts (all of them, or a seeded handful for a small city), each with a kind
+taken from what the district is like (Ixelles is a university district, Anderlecht an industrial one). Any other city makes up 3 to
+12 districts of its own (a kind such as harbour or industrial and a fictional name such as `alder-quay`, see districts.py: two cities
+almost never share one); `real=True` (the API and the CLI ask for it) names a new city after the first bundled real city that is not
+taken yet, and only when both are taken falls back to invented names,
 gives each district the sensor types that plausibly belong there (a harbour has water levels and vibration, an industrial park has
 air quality, noise and power, a residential district has noise, parking and waste), draws group sizes from a skewed distribution
 (a few big groups, many small), and gives each group its own protocol, frequency, burst percentage and sometimes a narrower range.
@@ -13,7 +17,7 @@ import random
 import re
 from dataclasses import dataclass
 
-from . import fleet
+from . import fleet, realcities
 from .catalog import TYPES
 from .districts import KINDS, district_id, pretty
 from .model import (
@@ -218,8 +222,14 @@ def _range(rng: random.Random, kind: str) -> tuple[float | None, float | None]:
     return (new_lo, new_hi) if new_lo < new_hi else (None, None)
 
 
+def real_name(taken) -> str | None:
+    """The first bundled real city (brussels, vienna) whose name is not taken, else None."""
+    return next((c for c in realcities.available() if c not in taken), None)
+
+
 def generate_city(seed: int, size="medium", profile: str = "mixed", name: str | None = None, taken: frozenset | set = frozenset(),
-                  target_url: str | None = None, token_env: str = "CITYPULSE_INGEST_TOKEN", autostart: bool = False) -> Generated:
+                  target_url: str | None = None, token_env: str = "CITYPULSE_INGEST_TOKEN", autostart: bool = False,
+                  real: bool = False) -> Generated:
     """One demo city (`target_url` None: the fleet CityPulse reference when CITYPULSE_URL is set on this app, else empty). The same (seed, size, profile) always gives the same districts and groups; `name` and `taken` only decide the
     name (a given name is used as it is; otherwise one is made up and kept out of `taken`)."""
     if profile not in PROFILES:
@@ -230,7 +240,8 @@ def generate_city(seed: int, size="medium", profile: str = "mixed", name: str | 
     total, label = target_sensors(size, rng)
     if name is not None and (not isinstance(name, str) or not NAME.match(name)):
         raise SpecError("name must be lowercase letters, digits and dashes (1 to 40 characters)")
-    city_name = name or unique_name(_rng("cpsim-name", seed, size, profile), set(taken))
+    city_name = name or (real and real_name(taken)) or unique_name(_rng("cpsim-name", seed, size, profile), set(taken))
+    rc = realcities.load(city_name)
 
     # which districts
     if label == "small" or total <= 400:
@@ -239,24 +250,34 @@ def generate_city(seed: int, size="medium", profile: str = "mixed", name: str | 
         low, high = 5, 12
     else:
         low, high = 3, 12
-    n_districts = max(3, min(MAX_DISTRICTS, total // 2, round(rng.uniform(low - 0.5, high + 0.5))))
-    if profile == "mixed":
-        mix = {kind: math.exp(rng.gauss(0, 1.1)) for kind in KINDS}
+    real_names: dict[str, str] = {}
+    if rc is not None:                                        # a real city: its own districts, with the kind each one is
+        every = [d.id for d in rc.districts]
+        real_names = {d.id: d.name for d in rc.districts}
+        if label == "small" or total <= 400:
+            pick = min(len(every), max(3, total // 2), round(rng.uniform(4.5, 7.5)))
+            every = rng.sample(every, pick)
+        named = sorted((d, realcities.KINDS[city_name][d]) for d in every)
     else:
-        mix = {kind: PROFILE_DISTRICTS[profile].get(kind, 1) for kind in KINDS}
-    kinds: list[str] = []                                     # a kind may repeat (two harbours), each repeat less likely
-    for _ in range(n_districts):
-        w = {k: mix[k] * rng.uniform(0.6, 1.4) / (3 ** kinds.count(k)) for k in KINDS}
-        kinds.append(rng.choices(list(w), list(w.values()))[0])
-    names: set[str] = set()
-    named = []
-    for kind in kinds:
-        d = district_id(rng, kind, names)
-        names.add(d)
-        named.append((d, kind))
-    named.sort()
+        n_districts = max(3, min(MAX_DISTRICTS, total // 2, round(rng.uniform(low - 0.5, high + 0.5))))
+        if profile == "mixed":
+            mix = {kind: math.exp(rng.gauss(0, 1.1)) for kind in KINDS}
+        else:
+            mix = {kind: PROFILE_DISTRICTS[profile].get(kind, 1) for kind in KINDS}
+        kinds: list[str] = []                                     # a kind may repeat (two harbours), each repeat less likely
+        for _ in range(n_districts):
+            w = {k: mix[k] * rng.uniform(0.6, 1.4) / (3 ** kinds.count(k)) for k in KINDS}
+            kinds.append(rng.choices(list(w), list(w.values()))[0])
+        names: set[str] = set()
+        named = []
+        for kind in kinds:
+            d = district_id(rng, kind, names)
+            names.add(d)
+            named.append((d, kind))
+        named.sort()
     ids = [d for d, _ in named]
     kind_of = dict(named)
+
     type_boost = PROFILE_TYPES.get(profile, {})
     if profile == "mixed":                                    # a mixed city leans on two or three themes of its own
         for theme in rng.sample([t for t in PROFILE_TYPES.values()], 2):
@@ -307,7 +328,7 @@ def generate_city(seed: int, size="medium", profile: str = "mixed", name: str | 
     city = {"name": city_name, "target_url": target_url, "token_env": token_env, "seed": seed,
             "poll_interval": rng.choices(*zip(*POLL_CHOICES))[0], "expose": False, "autostart": bool(autostart), "groups": groups}
     parse_city(city)                                          # never hand out something the rest of the app would refuse
-    districts = [{"id": d, "name": pretty(d), "kind": kind_of[d],
+    districts = [{"id": d, "name": real_names.get(d) or pretty(d), "kind": kind_of[d],
                   "sensors": sum(g["count"] for g in groups if g["district"] == d),
                   "groups": sum(1 for g in groups if g["district"] == d),
                   "types": [g["type"] for g in groups if g["district"] == d]} for d in ids]
@@ -319,7 +340,7 @@ def signature(g: Generated) -> tuple:
 
 
 def generate_cities(count: int = 1, size="medium", profile: str = "mixed", seed: int | None = None, name: str | None = None,
-                    taken: set[str] | frozenset = frozenset(), **kw) -> list[Generated]:
+                    taken: set[str] | frozenset = frozenset(), **kw) -> list[Generated]:   # kw: real=True, target_url, token_env, autostart
     """`count` (1 to 50) different cities. With a `seed`, city i uses seed + i, so the batch is reproducible and no two are alike; with
     none, a random seed is drawn. Names never repeat and never collide with `taken`; a given `name` is used as it is for one city
     (an error if taken) and as the stem `name-1`, `name-2`... for several."""

@@ -36,14 +36,15 @@ def test_generate_creates_varied_cities_and_reports_them(client):  # noqa: F811
     kinds = cat_kinds(client, op)
     for c in out["cities"]:
         for d in c["districts"]:
-            assert DISTRICT_ID.match(d["id"]) and d["kind"] in kinds and d["name"] == pretty(d["id"])
+            assert DISTRICT_ID.match(d["id"]) and d["kind"] in kinds and d["name"] == (pretty(d["id"]) if c["name"] not in ("brussels", "vienna") else d["name"])
     saved = {c["name"]: c for c in client.get("/api/cities", headers=op).json()}
     assert set(saved) == {c["name"] for c in out["cities"]} and all(saved[c["name"]]["sensors"] == c["sensors"] for c in out["cities"])
     one = client.get(f"/api/cities/{out['cities'][0]['name']}", headers=op).json()
     assert one["seed"] == 5 and one["autostart"] is False and one["target_url"] == "" and one["token_env"] == "CITYPULSE_INGEST_TOKEN"
     again = client.post("/api/cities/generate", headers=op, json={"count": 10, "size": "medium", "profile": "mixed", "seed": 5}).json()
     assert not {c["name"] for c in again["cities"]} & set(saved)                      # never replaces an existing city
-    assert [c["districts"] for c in again["cities"]] == [c["districts"] for c in out["cities"]]   # same seeds, same cities
+    assert [c["name"] for c in out["cities"]][:2] == ["brussels", "vienna"], "real names first"
+    assert [c["districts"] for c in again["cities"]][2:] == [c["districts"] for c in out["cities"]][2:]   # same seeds, same cities (the real names are taken the second time)
 
 
 def cat_kinds(client, op):  # noqa: F811

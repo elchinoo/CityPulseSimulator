@@ -49,8 +49,8 @@ Headless: `cpsim workloads run` keeps a file's `target_url: ${PAYBROKER_URL}` as
 ## Demo cities that differ: the generator
 
 A fixed preset gives the very same city every time. To get cities that differ, **generate** them: each city makes up its own
-districts (3 to 12, each with a kind and a fictional name of its own), the sensor types that suit each district, group sizes, protocols, frequencies,
-burst percentages and sometimes a narrower value range. **Same seed, size and profile give the same city; another seed gives another.** Sensors also report a deterministic map position (`lat`/`lon`, [guide 8.1.1](docs/GUIDE.md#811-positions-on-the-map)); `positions: false` or `CPSIM_POSITIONS=off` disables it. They also send deterministic device metadata (`attrs`: vendor, firmware, calibration, tags; [guide 8.1.2](docs/GUIDE.md#812-sensor-attributes)); the rare old firmware `1.4.2` deliberately faults about three times as often, so CityPulse's explain has something to find. `attrs: false` or `CPSIM_ATTRS=off` disables it.
+districts (3 to 12, each with a kind and a fictional name of its own; a city named after a bundled real city, `brussels` or `vienna`, has that city's real districts instead, and new generated cities take those names first), the sensor types that suit each district, group sizes, protocols, frequencies,
+burst percentages and sometimes a narrower value range. **Same seed, size and profile give the same city; another seed gives another.** A city called `brussels` or `vienna` has that city's **real districts** (a generated city is named after them first) and its sensors sit **inside the real district polygons**, near main roads and denser towards the centre; sensors report that deterministic map position (`lat`/`lon`, [guide 8.1.1](docs/GUIDE.md#811-positions-on-the-map)); `positions: false` or `CPSIM_POSITIONS=off` disables it. They also send deterministic device metadata (`attrs`: vendor, firmware, calibration, tags; [guide 8.1.2](docs/GUIDE.md#812-sensor-attributes)); the rare old firmware `1.4.2` deliberately faults about three times as often, so CityPulse's explain has something to find. `attrs: false` or `CPSIM_ATTRS=off` disables it.
 
 * **District names are made up per city**, so two cities almost never share one: a district id is `<qualifier>-<noun>` (`alder-quay`,
   `north-mill`, `linden-heights`, `st-clair-campus`) with about 160 qualifiers and 20 nouns per kind, about 3,100 names per kind and
@@ -361,7 +361,7 @@ protocols), set **CityPulse URL**, export the token and press **Start city**:
 export CITYPULSE_INGEST_TOKEN=<an ingest token created in CityPulse Settings>   # before `cpsim serve`
 ```
 
-Headless, from a file: `cpsim validate examples/metropolis.yaml` then `cpsim run examples/metropolis.yaml`.
+Headless, from a file: `cpsim validate examples/brussels.yaml` then `cpsim run examples/brussels.yaml`.
 Without a CityPulse URL a city only generates data (useful to point your own Modbus/PROFIBUS tooling at its devices; the
 city page shows each endpoint). Endpoints bind to loopback unless you tick *Let other machines reach the protocol endpoints*.
 

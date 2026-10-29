@@ -77,7 +77,7 @@ function summaryTable(r) {
 async function renderList(box) {
   let cities;
   try { cities = await api("/api/cities"); } catch (err) { fill(box, h("p", { class: "error" }, err.message)); return; }
-  const name = h("input", { id: "nc-name", required: true, maxlength: "40", placeholder: "metropolis", pattern: "[a-z0-9][a-z0-9-]*" });
+  const name = h("input", { id: "nc-name", required: true, maxlength: "40", placeholder: "brussels", pattern: "[a-z0-9][a-z0-9-]*" });
   const err = h("p", { class: "error", role: "alert" });
   const create = async (spec) => {
     err.textContent = "";

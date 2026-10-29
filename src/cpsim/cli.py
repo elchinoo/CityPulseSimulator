@@ -247,7 +247,7 @@ def _generate_cities(args) -> int:
         taken = {f.stem for f in out.iterdir() if f.suffix in (".yaml", ".yml", ".json")}
     size = int(args.size) if str(args.size).isdigit() else args.size
     cities = citygen.generate_cities(args.count, size, args.profile, args.seed, args.name, taken,
-                                     target_url=args.target_url, token_env=args.token_env, autostart=args.autostart)
+                                     target_url=args.target_url, token_env=args.token_env, autostart=args.autostart, real=True)
     if out is not None:
         out.mkdir(parents=True, exist_ok=True)
         for g in cities:

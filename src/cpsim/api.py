@@ -472,7 +472,7 @@ def generate_cities(body: GenerateBody):
     try:
         taken = set(store.cities())
         made = citygen.generate_cities(body.count, body.size, body.profile, body.seed, body.name, taken,
-                                       target_url=None if body.target_url is None else check_target(body.target_url), token_env=body.token_env, autostart=body.autostart)
+                                       target_url=None if body.target_url is None else check_target(body.target_url), token_env=body.token_env, autostart=body.autostart, real=True)
         for g in made:
             parse_city(g.city)
     except SpecError as exc:

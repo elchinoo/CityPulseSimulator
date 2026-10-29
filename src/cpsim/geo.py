@@ -1,7 +1,13 @@
 """Where a simulated city is on the map, so CityPulse can draw it (`lat`/`lon` per reading, WGS 84, 6 decimals).
 
 Everything is a pure function of names, never of a seed or the clock, so the same city name gives the same map after a restart, a
-recreate or a changed seed, and sensors never jump:
+recreate or a changed seed, and sensors never jump.
+
+REAL CITIES (`brussels`, `vienna`, see realcities.py): the city's districts are the real communes or districts, and every sensor is
+placed inside the real polygon of its district, biased towards main roads and the dense centre. A district id that is not a real one
+(a hand-made `d01`) stands in for one real district, chosen by a hash of the id. CityPulse stores the same polygons, so its map and
+its geographic queries agree with these positions. Every other city name works as described below (cells on a square spiral; this
+is also how cities saved by older versions, with invented names, keep their place):
 
 * the city's ORIGIN is a built-in anchor for known names (`gotham` is New York, `london` is London) and otherwise comes from a hash of
   its name: latitude -50..58, longitude -165..165 (clear of the poles and the antimeridian);
@@ -18,6 +24,7 @@ it was sent (`coalesce` on the sensor row), so a few repeats are enough to resto
 import hashlib
 import math
 
+from . import realcities
 from .districts import NOUNS
 
 CELL_M = 1500.0                  # side of a district cell
@@ -61,6 +68,7 @@ ANCHORS: dict[str, tuple[float, float]] = {
     "boston": (42.3601, -71.0589), "toronto": (43.6532, -79.3832), "sao paulo": (-23.5505, -46.6333),
     "mexico city": (19.4326, -99.1332), "mumbai": (19.0760, 72.8777), "singapore": (1.3521, 103.8198),
     "cape town": (-33.9249, 18.4241), "dubai": (25.2048, 55.2708), "amsterdam": (52.3676, 4.9041),
+    "brussels": realcities.CENTRES["brussels"], "vienna": realcities.CENTRES["vienna"],
 }
 
 
@@ -109,13 +117,19 @@ class CityMap:
     def __init__(self, city: str, districts):
         self.city, self.cells = city, cells(districts)
         self.lat0, self.lon0 = origin(city)
+        self.real = realcities.load(city)            # a bundled real city: positions come from its polygons
 
     def district_centre(self, district: str) -> tuple[float, float]:
+        if self.real:
+            lon, lat = realcities.stand_in(self.real, district).interior
+            return round(lat, 6), round(lon, 6)
         cx, cy = self.cells[district]
         dlat, dlon = _offset(self.lat0, cx * CELL_M, cy * CELL_M)
         return round(self.lat0 + dlat, 6), round(self.lon0 + dlon, 6)
 
     def position(self, sensor: str, district: str) -> tuple[float, float]:
+        if self.real:
+            return realcities.place(self.real, sensor, district)
         cx, cy = self.cells[district]
         span = 1 - 2 * MARGIN
         east = (cx + (MARGIN + _unit(self.city, sensor, "x") * span) - 0.5) * CELL_M
