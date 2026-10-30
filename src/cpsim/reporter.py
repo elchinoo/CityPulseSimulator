@@ -8,8 +8,6 @@ import asyncio
 import sys
 import time
 
-import httpx
-
 from . import __version__, outbound
 from .config import get_settings
 from .model import SpecError, check_target
@@ -22,7 +20,7 @@ INTERVAL, FAIL_AFTER = 15, 45
 
 class Reporter:
     def __init__(self, url: str, token, runtime):
-        self.client = httpx.AsyncClient(base_url=url, timeout=15, follow_redirects=False, auth=BearerAuth(token))
+        self.client = outbound.client(url, timeout=15, auth=BearerAuth(token))
         self.runtime, self.registered = runtime, False
         self.prev: dict[str, tuple[int, int]] = {}
         self.failing_since: float | None = None
@@ -81,4 +79,8 @@ def maybe_start(runtime) -> Reporter | None:
         return None
     if not (cfg.pagerlens_url and token):
         return None
-    return Reporter(cfg.pagerlens_url, token, runtime)
+    try:
+        return Reporter(cfg.pagerlens_url, token, runtime)         # pinned to the address the NetGuard validated
+    except SpecError as exc:
+        print(f"reporter: refusing PAGERLENS_URL, {exc}", file=sys.stderr)
+        return None

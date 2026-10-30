@@ -7,6 +7,8 @@ from datetime import date
 
 import httpx
 
+from . import outbound
+from .errors import SpecError
 from .hr_gen import Employee, Plan, build_plan
 from .hr_model import Company
 from .sinks import Fatal
@@ -20,7 +22,7 @@ class TrustDeskClient:
     """Bearer token goes only to the configured URL; redirects are never followed."""
 
     def __init__(self, url: str, token):
-        self.http = httpx.AsyncClient(base_url=url, timeout=30, follow_redirects=False, auth=BearerAuth(token))
+        self.http = outbound.client(url, timeout=30, auth=BearerAuth(token))
 
     async def call(self, method: str, path: str, *, json=None, headers=None) -> httpx.Response:
         last = "no answer"
@@ -117,7 +119,7 @@ class HrRun:
             await self._create_employees(self.plan.employees)
             await self._send_requests(self.plan)
             self.state = "stopped" if self._stop.is_set() else "done"
-        except Fatal as exc:
+        except (Fatal, SpecError) as exc:
             self.state, self.fatal = "failed", str(exc)
         except ConnectionError as exc:
             self.state, self.fatal = "failed", str(exc)

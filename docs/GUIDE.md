@@ -370,7 +370,7 @@ default file path.
 | `CPSIM_OIDC_CLIENT_ID` | `cpsim` | The web client id (also the expected audience of access tokens). |
 | `CPSIM_OIDC_CLIENT_SECRET[_FILE]` | none | The web client's secret. |
 | `CPSIM_LOCAL_LOGIN` | true | `false` removes the admin-password login when SSO is on. Truthy values: `1`, `true`, `yes`, `on`. |
-| `CPSIM_API_KEY[_FILE]` | none (default file `/etc/cpsim/api_key`) | Static **full-access** key for automation. Also accepted at the sign-in form. |
+| `CPSIM_API_KEY[_FILE]` | none (default file `/etc/cpsim/api_key`) | Static **full-access** key for automation, at least 32 characters (shorter is refused). Also accepted at the sign-in form. |
 | `CPSIM_METRICS_TOKEN[_FILE]` | none (default file `/etc/cpsim/metrics_token`) | Static token that can scrape `/metrics` and nothing else. |
 | `CPSIM_ALLOW_ANONYMOUS` | false | Demo only: disables authentication entirely. |
 | `CPSIM_ENCRYPTION_KEY[_FILE]` | none (default file `/etc/cpsim/encryption_key`) | Platform secret that unlocks the credential store at start (creating the vault on first use). Without it nothing can be saved under Settings > Credentials until an administrator signs in with the password. |
@@ -399,6 +399,8 @@ default file path.
 | `CPSIM_TARGET_ALLOWLIST` | Extra hostnames a target may have (comma or space separated; `.domain` matches the domain and its subdomains). The hosts of the ecosystem URLs given by environment (`CITYPULSE_URL`, `TRUSTDESK_URL`, `PAYBROKER_URL`, `SHOPFRONT_URL`, `PAGERLENS_URL`, `LLMGW_URL`, `IDENTITY_URL`) are always allowed; any other host is refused when something starts. |
 | `CPSIM_ALLOW_PRIVATE_URLS` | `true` lets the NetGuard accept private and loopback addresses (local stand-ins). Link-local is never accepted. Default: refused. |
 | `CPSIM_TOKEN_ENV_ALLOWLIST` | Extra variable names a `token_env` may name, on top of the kinds' default variables. `LLM_API_KEY` and `*_ENCRYPTION_KEY` can never be added. |
+| `CPSIM_HOST` | `127.0.0.1` (else `HOST`) | The address `cpsim serve` binds to. `CPSIM_ALLOW_ANONYMOUS` is honoured only on loopback (or with `CPSIM_ALLOW_ANONYMOUS_PUBLIC=1`). |
+| `CPSIM_TRUSTED_HOPS` | `1` | How many proxies append to `X-Forwarded-For` (the client address is that entry from the right); `0` uses the socket peer. |
 | `CPSIM_FORWARDED_ALLOW_IPS` | Peers whose `X-Forwarded-*` headers uvicorn believes. Default `127.0.0.1`; behind AgentPG's single proxy set that proxy's address. Never `*`. |
 | `CPSIM_POSITIONS` | on | `0`, `false`, `no` or `off` stops every city sending `lat`/`lon` (8.1.1); the per-city `positions` setting is the finer switch. |
 | `CPSIM_ATTRS` | on | `0`, `false`, `no` or `off` stops every city sending sensor `attrs` (8.1.2); the per-city `attrs` setting is the finer switch. |
@@ -670,13 +672,20 @@ The `cpsim-service` client secret and environment variables are not in the datab
 |---|---|
 | Admin password | Settings > Admin password (signs everyone out), or `cpsim reset-admin` then restart and use the new setup code. **`reset-admin` also resets the vault**, so saved credentials could never be read again: the command names them, says they will be deleted, and asks you to type `delete credentials` (`--yes` skips the question; nothing is asked when none is saved). Save them again afterwards. Prefer the change-password route. |
 | API token | Settings > API tokens: create a new one, then revoke the old. |
-| `CPSIM_API_KEY`, `CPSIM_METRICS_TOKEN`, `CPSIM_ENCRYPTION_KEY`, OIDC and service client secrets, ingest and merchant keys | Environment variables of the sandbox: change them and **recreate the sandbox** (database stays). With ecoctl: `ecoctl apply --rotate` rotates identity client secrets (see DEPLOY.md section 9). Rotating `CPSIM_ENCRYPTION_KEY` alone is not covered by any command in this repository: see Known limitations. |
+| `CPSIM_API_KEY`, `CPSIM_METRICS_TOKEN`, `CPSIM_ENCRYPTION_KEY`, OIDC and service client secrets, ingest and merchant keys | Environment variables of the sandbox: change them and **recreate the sandbox** (database stays). With ecoctl: `ecoctl apply --rotate` rotates identity client secrets (see DEPLOY.md section 9). Rotating `CPSIM_ENCRYPTION_KEY` alone only re-wraps the data key: use the data key rotation under Vault below. |
 | A saved credential | Settings > Credentials: paste the new value (replaces), or delete. |
 
 ### Vault
 
 The vault wraps one random data key under the admin password and, when `CPSIM_ENCRYPTION_KEY` is set, under that platform secret too. After a restart the store is **locked** unless the platform secret is
 present; then Settings shows a note ("the credential store is locked") and signing in with the admin password unlocks it for this session. Items that cannot be decrypted are skipped, not fatal.
+
+**Rotating the data key.** Re-wrapping (a new password or platform secret) keeps the same data key. To replace the key and re-encrypt every saved
+credential under it, an administrator calls `POST /api/vault/rotate-key` with `{"password": "<admin password>", "confirm": true}` (permission
+`settings:manage`; the password is required when an admin password is set). It runs in one transaction, answers `{"rotated": true, "reencrypted": {...}}`
+and writes one log line without secrets. **Restart every other replica afterwards**: they hold the old key in memory and cannot decrypt until they do.
+Old backups still open with the old key, so also re-issue the credentials at their source. Ciphertexts are bound to their credential name; saved
+values from earlier releases are rewritten bound on the next start, and kit 0.4.0 tokens cannot be read by older kits, so upgrade all processes together.
 
 ### Troubleshooting
 

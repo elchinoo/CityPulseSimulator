@@ -25,8 +25,15 @@ Please **do not open a public issue** for security problems. Use GitHub's privat
 - Automation may use `CPSIM_API_KEY` (full access) or API tokens created under Settings (scope read, metrics or full; stored only as a hash,
   shown once, revocable). `/metrics` accepts only `CPSIM_METRICS_TOKEN` (or a full credential); a
   metrics token can read nothing else and a browser session cannot scrape.
-- With no credential configured the app denies everything; `CPSIM_ALLOW_ANONYMOUS=true` is an explicit demo-only opt-out.
-- Failed credentials are rate limited (10 per minute per client address, in memory, per process).
+- With no credential configured the app denies everything; `CPSIM_ALLOW_ANONYMOUS=true` is an explicit demo-only opt-out, honoured only while the
+  server binds to loopback (`CPSIM_HOST`, else `HOST`, default `127.0.0.1`); on any other address it is ignored unless
+  `CPSIM_ALLOW_ANONYMOUS_PUBLIC=1` is also set.
+- A static `CPSIM_API_KEY` must be at least 32 characters (a shorter one is refused) and logs a startup warning.
+- Failed credentials are rate limited (10 per minute per client address, in memory, per process). The password login counts the attempt before it
+  hashes, so a burst cannot run many derivations; when every derivation slot is busy the answer is 503 with `Retry-After`.
+- Single sign-on is tied to the browser that started it by the `apg_oidc_bind` cookie (HttpOnly, short-lived, single use): a callback without it is refused.
+- The client address used for rate limiting is the `CPSIM_TRUSTED_HOPS`-th entry of `X-Forwarded-For` from the right (default 1, one proxy;
+  `0` uses the socket peer).
 
 **Secrets are never stored in a city.** A city holds only the *name* of the environment variable that carries its CityPulse
 ingest token (validated as an upper-case variable name, so pasting a token there is refused). Cities, companies, workloads and the credentials
@@ -46,7 +53,9 @@ first release is retired (`cpsim import-files` loads it once).
 - A saved credential is bound to the origin it was saved for (a well-known name defaults to its own app, any other name needs an origin) and is
   never sent anywhere else. A value from the environment is the operator's own choice and is not bound.
 - uvicorn trusts `X-Forwarded-*` only from `CPSIM_FORWARDED_ALLOW_IPS` (default `127.0.0.1`). Behind AgentPG's proxy set it to the proxy's address.
-- Limitation: the host is resolved once for the check and again by the HTTP client (a pinned connection needs a newer kit than the pinned one).
+- The connection is pinned: the NetGuard resolves the host once and every client (workloads, the TrustDesk client, the city sink, the PagerLens
+  reporter, the PayBroker address a shop publishes) connects to that validated address, keeping the Host header and the TLS server name. Redirects are never
+  followed. A client keeps its address until it is restarted.
 
 **Untrusted input.** Every city is validated: names, numbers (finite, bounded), counts (a group at most 5,000, a city 10,000),
 sensor types and protocols from allow-lists, unknown fields rejected. The CityPulse URL must be `https` (plain `http` only for
@@ -87,5 +96,8 @@ the credentials the workloads need, narrow and revocable. Running (`sim:run`), e
 vault, whose data key is wrapped under the platform secret `CPSIM_ENCRYPTION_KEY` and the admin password; the database alone cannot decrypt
 them. Plaintext exists only in process memory; no endpoint returns it and the interface never shows it. Names must contain `TOKEN`, `KEY` or
 `SECRET` and may not be the simulator's own or the database's; only `settings:manage` may list, save or delete them. The environment wins
-over a saved value, so an operator can always override from outside. Residual risk: an administrator can point a workload at a URL they
+over a saved value, so an operator can always override from outside. Each ciphertext is bound to its row (context
+`cpsim_credential.ciphertext:<name>`), so a value copied to another credential name does not decrypt there; values saved by earlier releases are
+read and rewritten bound on the next start. To replace the data key itself (after the database or a backup may have been exposed) see
+[rotation](docs/GUIDE.md#vault); the secrets themselves must be re-issued at their source too. Residual risk: an administrator can point a workload at a URL they
 control and have the simulator send that workload's credential there; keep the role for people you trust with the credentials.

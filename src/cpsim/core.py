@@ -4,13 +4,15 @@ Permissions are what the code checks (`sim:run`); roles (given to people by the 
 services, local API tokens and the static key) are mapped onto them here, in one place.
 """
 
+import os
+
 from apgkit import metrics as metrics_mod
 from apgkit.auth import AppAuth, Authenticator, LocalAuth, Principal, from_env
 from apgkit.config import env_bool, read_secret
 from apgkit.db import Database
 from apgkit.vault import Vault
 
-from . import __version__
+from . import __version__, credentials
 
 APP = "cpsim"
 COOKIE = "cs_session"
@@ -47,11 +49,17 @@ APP_AUTH = AppAuth(APP, fed.client_id, ROLE_PERMISSIONS, SCOPE_PERMISSIONS)
 local = LocalAuth(APP_AUTH, env_prefix="CPSIM", token_prefix="cs_", token_scopes={"read", "metrics", "full"}, vault=vault)
 
 
+def bind_host() -> str:
+    """The address the server binds to (the same setting `cpsim serve` passes to uvicorn). CPSIM_ALLOW_ANONYMOUS is honoured only on loopback."""
+    return os.environ.get("CPSIM_HOST") or os.environ.get("HOST") or "127.0.0.1"
+
+
 def metrics_token() -> str:
     return read_secret("CPSIM_METRICS_TOKEN", "/etc/cpsim/metrics_token")
 
 
 # the static CPSIM_METRICS_TOKEN may scrape /metrics and nothing else
-auth = Authenticator(APP_AUTH, local, db, cookie_name=COOKIE, verifier=fed.verifier, allow_anonymous=lambda: env_bool("CPSIM_ALLOW_ANONYMOUS"),
+auth = Authenticator(APP_AUTH, local, db, cookie_name=COOKIE, verifier=fed.verifier, allow_anonymous=lambda: env_bool("CPSIM_ALLOW_ANONYMOUS"), bind_host=bind_host(),
                      static_tokens=[(metrics_token, Principal("static", "metrics-token", frozenset({"metrics:scrape"}), name="metrics token"))])
+credentials.register_store(vault)        # rotate_data_key re-encrypts the saved credentials
 public_url_env = "CPSIM_PUBLIC_URL"

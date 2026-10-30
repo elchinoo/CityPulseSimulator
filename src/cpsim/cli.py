@@ -22,7 +22,7 @@ def _serve() -> None:
     from . import migrate
 
     migrate.run()
-    uvicorn.run("cpsim.api:app", host=os.environ.get("HOST", "127.0.0.1"), port=int(os.environ.get("PORT", "8000")),
+    uvicorn.run("cpsim.api:app", host=os.environ.get("CPSIM_HOST") or os.environ.get("HOST") or "127.0.0.1", port=int(os.environ.get("PORT", "8000")),
                 proxy_headers=True, forwarded_allow_ips=forwarded_allow_ips(), log_level=os.environ.get("LOG_LEVEL", "info"))
 
 

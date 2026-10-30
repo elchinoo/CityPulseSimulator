@@ -15,6 +15,19 @@ _stored: dict[str, str] = {}
 _origins: dict[str, str] = {}          # name -> where the saved value may be sent: an origin or a fleet reference (`${PAYBROKER_URL}`)
 _lock = threading.Lock()
 
+STORE = "cpsim_credential.ciphertext"
+
+
+def context(name: str) -> str:
+    """What binds a saved ciphertext to its row: a value copied to another credential name does not decrypt there."""
+    return f"{STORE}:{name}"
+
+
+def register_store(vault) -> None:
+    """Declare the encrypted column so `rotate_data_key` re-encrypts it, each value under its own context."""
+    vault.register_store(STORE, "SELECT name, ciphertext AS value FROM cpsim_credential",
+                         "UPDATE cpsim_credential SET ciphertext = %(value)s WHERE name = %(name)s", context=STORE + ":{name}")
+
 
 def bound_origin(name: str) -> str:
     """Where the SAVED value of `name` may go: the origin it was saved with, else (a value saved before origins existed) the ecosystem
@@ -55,14 +68,25 @@ def load(conn, vault) -> bool:
     if not vault.is_unlocked():
         return False
     rows = conn.execute("SELECT name, ciphertext, origin FROM cpsim_credential").fetchall()
-    fresh, origins = {}, {}
+    fresh, origins, upgraded = {}, {}, []
     for r in rows:
         try:
-            fresh[r["name"]] = vault.decrypt(r["ciphertext"])
-        except Exception:  # noqa: BLE001 - a value from another data key; leave it out rather than fail the others
-            continue
+            fresh[r["name"]] = vault.decrypt(r["ciphertext"], context(r["name"]))
+            if vault.is_legacy(r["ciphertext"]):          # Fernet carries no context: rewrite it as a v2 token bound to this row
+                upgraded.append((r["name"], vault.encrypt(fresh[r["name"]], context(r["name"]))))
+        except Exception:  # noqa: BLE001 - not bound to this row: a value saved before contexts existed (legacy Fernet, or no context)
+            try:
+                plain = vault.decrypt(r["ciphertext"])
+            except Exception:  # noqa: BLE001 - a value from another data key; leave it out rather than fail the others
+                continue
+            fresh[r["name"]] = plain
+            upgraded.append((r["name"], vault.encrypt(plain, context(r["name"]))))
         if r["origin"]:
             origins[r["name"]] = r["origin"]
+    for name, token in upgraded:        # read-through upgrade: bind the old values to their row from now on
+        conn.execute("UPDATE cpsim_credential SET ciphertext = %s WHERE name = %s", (token, name))
+    if upgraded:
+        conn.commit()
     with _lock:
         _stored.clear()
         _stored.update(fresh)
@@ -106,7 +130,7 @@ def put(conn, vault, name: str, value: str, origin: str | None = None) -> None:
         raise SpecError("a credential is one line of at most 4096 characters")
     bound = clean_origin(name, origin)
     conn.execute("INSERT INTO cpsim_credential (name, ciphertext, origin) VALUES (%s, %s, %s) ON CONFLICT (name) DO UPDATE "
-                 "SET ciphertext = EXCLUDED.ciphertext, origin = EXCLUDED.origin, updated_at = now()", (name, vault.encrypt(value), bound))
+                 "SET ciphertext = EXCLUDED.ciphertext, origin = EXCLUDED.origin, updated_at = now()", (name, vault.encrypt(value, context(name)), bound))
     conn.commit()
     with _lock:
         _stored[name] = value

@@ -373,7 +373,7 @@ city page shows each endpoint). Endpoints bind to loopback unless you tick *Let 
 | `CITYPULSE_INGEST_TOKEN` (or the variable a city names in `token_env`) | The ingest token for that city's CityPulse. Also read from `<NAME>_FILE`, or saved under Settings > Credentials. **Never stored in the city itself.** |
 | `TRUSTDESK_CLIENT_TOKEN` (or the variable a company names in `token_env`) | A TrustDesk token with the *Client application* scope, for Companies. Also read from `<NAME>_FILE`, or saved under Settings > Credentials. **Never stored in the company itself.** |
 | `CPSIM_METRICS_TOKEN` | Lets `/metrics` be scraped with a token that can read nothing else. |
-| `CPSIM_API_KEY` | Optional static full-access key for automation. API tokens (read, metrics or full) can also be created under Settings. |
+| `CPSIM_API_KEY` | Optional static full-access key for automation (at least 32 characters). API tokens (read, metrics or full) can also be created under Settings. |
 | `PAGERLENS_URL`, `PAGERLENS_TOKEN` | Report to PagerLens (an ingest token from PagerLens). https required unless localhost. |
 | `PAYBROKER_SECRET_KEY`, `LLMGW_CLIENT_KEY` (else `LLM_API_KEY`), `PAGERLENS_TOKEN`, `SHOPFRONT_TOKEN` (or the variable a workload names in `token_env`) | Credentials for workloads. Also read from `<NAME>_FILE`, or saved under Settings > Credentials. **Never stored in the workload itself.** A name must contain `TOKEN`, `KEY` or `SECRET` and may not be one of the simulator's own (`CPSIM_*`) or the database's. |
 | `CPSIM_ENCRYPTION_KEY[_FILE]` | Platform secret that unlocks the credential store at start, so credentials saved under Settings > Credentials survive a restart. Without it nothing can be saved. |
@@ -384,6 +384,8 @@ city page shows each endpoint). Endpoints bind to loopback unless you tick *Let 
 | `CPSIM_TARGET_ALLOWLIST` | Extra hostnames a target may have (comma or space separated; `.domain` matches the domain and its subdomains). The hosts of the ecosystem URLs given by environment (`CITYPULSE_URL`, `TRUSTDESK_URL`, `PAYBROKER_URL`, `SHOPFRONT_URL`, `PAGERLENS_URL`, `LLMGW_URL`, `IDENTITY_URL`) are always allowed; any other host is refused when something starts. |
 | `CPSIM_ALLOW_PRIVATE_URLS` | `true` lets the NetGuard accept private and loopback addresses (local stand-ins). Link-local is never accepted. Default: refused. |
 | `CPSIM_TOKEN_ENV_ALLOWLIST` | Extra variable names a `token_env` may name, on top of the kinds' default variables. `LLM_API_KEY` and `*_ENCRYPTION_KEY` can never be added. |
+| `CPSIM_HOST` | `127.0.0.1` (else `HOST`) | The address `cpsim serve` binds to. `CPSIM_ALLOW_ANONYMOUS` is honoured only on loopback (or with `CPSIM_ALLOW_ANONYMOUS_PUBLIC=1`). |
+| `CPSIM_TRUSTED_HOPS` | `1` | How many proxies append to `X-Forwarded-For` (the client address is that entry from the right); `0` uses the socket peer. |
 | `CPSIM_FORWARDED_ALLOW_IPS` | Peers whose `X-Forwarded-*` headers uvicorn believes. Default `127.0.0.1`; behind AgentPG's single proxy set that proxy's address. Never `*`. |
 | `CPSIM_ALLOW_ANONYMOUS` | Demo only: disables authentication entirely. |
 

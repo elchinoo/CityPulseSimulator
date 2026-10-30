@@ -12,6 +12,7 @@ from dataclasses import dataclass
 
 import httpx
 
+from .. import outbound
 from ..model import SpecError
 from ..tokens import BearerAuth
 
@@ -77,8 +78,7 @@ class Http:
     """One client per workload. The credential goes only to the workload's URL; redirects are never followed."""
 
     def __init__(self, base_url: str, token=None, *, transport=None, timeout: float = 20.0):
-        self.client = httpx.AsyncClient(base_url=base_url, timeout=timeout, follow_redirects=False, transport=transport,
-                                        auth=BearerAuth(token) if token else None)
+        self.client = outbound.client(base_url, timeout=timeout, transport=transport, auth=BearerAuth(token) if token else None)
 
     async def call(self, method: str, path: str, *, json=None, headers=None, data=None, auth=None) -> tuple[httpx.Response | None, float, str]:
         """(response, seconds, error class name). On a network failure the response is None and only the class name is kept."""

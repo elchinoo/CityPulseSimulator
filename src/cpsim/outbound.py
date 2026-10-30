@@ -14,7 +14,8 @@ import os
 import re
 from urllib.parse import urlsplit
 
-from apgkit.netguard import NetGuard, UnsafeURL
+import httpx
+from apgkit.netguard import NetGuard, Resolved, UnsafeURL
 
 from . import fleet
 from .errors import SpecError
@@ -72,13 +73,41 @@ def check_allowed(url: str) -> str:
     return url
 
 
-def check_url(url: str) -> str:
-    """Allow-list, then the NetGuard (resolves the host: private and link-local addresses are refused unless CPSIM_ALLOW_PRIVATE_URLS)."""
+def pin(url: str) -> Resolved:
+    """Allow-list, then the NetGuard, which resolves the host ONCE: private and link-local addresses are refused unless
+    CPSIM_ALLOW_PRIVATE_URLS. The result carries the validated IP the connection must go to (see `client`)."""
     check_allowed(url)
     try:
-        return guard.check(url)
+        return guard.resolve(url)
     except UnsafeURL as exc:
         raise SpecError(f"target refused: {exc}") from exc
+
+
+def check_url(url: str) -> str:
+    """The URL as validated by `pin` (no trailing slash); use it for early refusal, then connect with `client`."""
+    return pin(url).url
+
+
+class PinnedClient(httpx.AsyncClient):
+    """An httpx client whose requests carry the TLS server name (`sni_hostname`) of a pinned target, so certificates are still checked
+    against the host name while the connection goes to the validated IP."""
+
+    def __init__(self, *args, pinned_extensions: dict | None = None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._pinned_extensions = dict(pinned_extensions or {})
+
+    def build_request(self, method, url, *, extensions=None, **kwargs):
+        return super().build_request(method, url, extensions={**self._pinned_extensions, **(extensions or {})}, **kwargs)
+
+
+def client(url: str, **kwargs) -> httpx.AsyncClient:
+    """The one way this app creates an HTTP client for a target: allow-listed, validated by the NetGuard, and pinned to the address it
+    validated (literal-IP URL, the original Host header and TLS server name; no second DNS lookup). Redirects are never followed.
+    Raises SpecError. `kwargs` go to httpx (timeout, auth, transport)."""
+    base, headers, ext = pin(url).request_args()
+    kwargs.pop("follow_redirects", None)
+    kwargs["headers"] = {**headers, **(kwargs.get("headers") or {})}
+    return PinnedClient(base_url=base, follow_redirects=False, pinned_extensions=ext, **kwargs)
 
 
 def origin_of(url: str) -> str:

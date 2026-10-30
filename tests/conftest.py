@@ -45,8 +45,15 @@ def db():
 class _OfflineGuard:
     """Stands in for the NetGuard in the tests that use made-up hosts (no DNS): same normalisation, no resolution."""
 
+    def resolve(self, url):
+        from urllib.parse import urlsplit
+
+        from apgkit.netguard import Resolved
+        parts = urlsplit(url)
+        return Resolved(url.rstrip("/"), parts.hostname, parts.port or (443 if parts.scheme == "https" else 80), parts.scheme, None)
+
     def check(self, url):
-        return url.rstrip("/")
+        return self.resolve(url).url
 
 
 @pytest.fixture(autouse=True)

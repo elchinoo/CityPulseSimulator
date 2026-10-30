@@ -22,7 +22,7 @@ def city_id(name: str) -> str:
     """The id a city is reported under: its name, or a shortened name plus a hash when it is too long for CityPulse."""
     if len(name) <= CITY_ID_MAX:
         return name
-    return f"{name[:CITY_ID_MAX - 9]}-{hashlib.sha1(name.encode()).hexdigest()[:8]}"
+    return f"{name[:CITY_ID_MAX - 9]}-{hashlib.sha1(name.encode(), usedforsecurity=False).hexdigest()[:8]}"
 
 
 ENV_NAME = re.compile(r"^[A-Z][A-Z0-9_]{0,63}$")

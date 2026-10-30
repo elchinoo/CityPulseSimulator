@@ -235,7 +235,10 @@ class ShopfrontSender(BaseSender):
             key = str(info.payments.get("publishable_key") or "")
             if not url or not key:
                 return Result("client_error", error="the shop published no PayBroker address or publishable key although payments are enabled")
-            self.pb = Http(url, key, transport=self.transport)
+            try:
+                self.pb = Http(url, key, transport=self.transport)        # pinned to the address the NetGuard validated
+            except SpecError as exc:
+                return Result("client_error", error=f"PayBroker address for tokenizing cards: {exc}")
             return self.pb
 
     async def _tokenize(self, pb: Http, number: str) -> tuple[str | None, Result | None]:

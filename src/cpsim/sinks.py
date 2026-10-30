@@ -1,6 +1,7 @@
 """Where readings go: CityPulse over HTTP (with an ingest token), or nowhere."""
 import httpx
 
+from . import outbound
 from .tokens import BearerAuth
 
 
@@ -27,7 +28,7 @@ class HttpSink:
     protection or send it somewhere unintended); the token is only ever sent to the configured URL."""
 
     def __init__(self, url: str, token):
-        self.client = httpx.AsyncClient(base_url=url, timeout=20, follow_redirects=False, auth=BearerAuth(token))
+        self.client = outbound.client(url, timeout=20, auth=BearerAuth(token))
 
     async def send(self, readings: list[dict]) -> None:
         try:

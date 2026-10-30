@@ -196,3 +196,16 @@ def test_the_admin_password_session_is_the_whole_app(client):
     s = client.get("/api/session").json()
     assert s["state"] == "logged_in" and s["user"]["permissions"] == ["*"] and s["user"]["source"] == "local"
     assert client.get("/api/tokens").status_code == 200
+
+
+def test_the_sso_callback_needs_the_binding_cookie(client):
+    r = client.get("/auth/login", follow_redirects=False)
+    assert "apg_oidc_bind" in r.headers["set-cookie"] and "HttpOnly" in r.headers["set-cookie"]
+    q = parse_qs(urlsplit(r.headers["location"]).query)
+    client.provider.nonce = q["nonce"][0]
+    client.cookies.delete("apg_oidc_bind")                                                            # another browser: it never got the cookie
+    refused = client.get("/auth/callback", params={"code": "c", "state": q["state"][0]}, follow_redirects=False)
+    assert refused.headers["location"].startswith("/?sso_error=") and "cs_session" not in refused.cookies
+    assert client.get("/api/cities").status_code == 401
+    r, q, cb = _sign_in(client)                                                                       # the browser that started it finishes it
+    assert cb.status_code == 303 and "cs_session" in cb.cookies and "apg_oidc_bind" in cb.headers["set-cookie"]     # and the cookie is cleared
