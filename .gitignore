@@ -14,3 +14,7 @@ dist/
 *.pem
 docs/video/out/
 docs/video/node_modules/
+.ecosystem/
+!.env.*example
+*.dbkey
+api_key
