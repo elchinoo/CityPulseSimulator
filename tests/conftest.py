@@ -8,6 +8,9 @@ for name in ("DB_EXTERNAL_DSN", "PSQL_CONNECTION_STRING", "CPSIM_API_KEY", "CPSI
              "CPSIM_ALLOW_HTTP_TARGETS", "PAYBROKER_SECRET_KEY", "LLMGW_CLIENT_KEY",
              "LLM_API_KEY", "LLM_CHAT_MODEL", "EMBEDDING_MODEL", "SHOPFRONT_URL", "SHOPFRONT_TOKEN"):
     os.environ.pop(name, None)
+os.environ.pop("CPSIM_TARGET_ALLOWLIST", None)
+os.environ.pop("CPSIM_TOKEN_ENV_ALLOWLIST", None)
+os.environ.pop("CPSIM_ALLOW_PRIVATE_URLS", None)
 os.environ["CPSIM_API_KEY_FILE"] = "/nonexistent/key"
 os.environ["CPSIM_METRICS_TOKEN_FILE"] = "/nonexistent/key"
 os.environ["CPSIM_SERVICE_CLIENT_SECRET_FILE"] = "/nonexistent/key"
@@ -37,3 +40,19 @@ def db():
     api.runtime.wl_runners.clear()
     api.runtime.company_schedules.clear()
     yield
+
+
+class _OfflineGuard:
+    """Stands in for the NetGuard in the tests that use made-up hosts (no DNS): same normalisation, no resolution."""
+
+    def check(self, url):
+        return url.rstrip("/")
+
+
+@pytest.fixture(autouse=True)
+def offline_guard(monkeypatch):
+    """The target allow-list stays real (the tests' hosts are listed here); only the DNS part of the NetGuard is replaced."""
+    from cpsim import outbound
+    monkeypatch.setattr(outbound, "guard", _OfflineGuard())
+    monkeypatch.setenv("CPSIM_TARGET_ALLOWLIST", ".example .example.org .invalid x paybroker pagerlens localhost 127.0.0.1")
+    monkeypatch.setenv("CPSIM_TOKEN_ENV_ALLOWLIST", "MY_TOKEN MY_OWN_KEY MY_SHOP_SECRET_KEY MY_GATEWAY_KEY MY_CLIENT_TOKEN X_TOKEN X_KEY GATEWAY_KEY PAYBROKER_KEY")

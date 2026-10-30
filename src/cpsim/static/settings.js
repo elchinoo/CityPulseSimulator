@@ -50,22 +50,26 @@ function credentialsCard() {
     const d = await api("/api/credentials");
     note.textContent = d.unlocked ? "" : "The credential store is locked: the app has no CPSIM_ENCRYPTION_KEY, so nothing can be saved. Signing in with the admin password unlocks it for this session.";
     box.replaceChildren(flushCard("Saved credentials", h("table", {},
-      h("thead", {}, h("tr", {}, ...["Name", "Source", "Used by", "New value", "Actions"].map((t) => (t === "Actions" ? h("th", {}, h("span", { class: "sr-only" }, t)) : h("th", {}, t))))),
+      h("thead", {}, h("tr", {}, ...["Name", "Source", "Used by", "New value", "Sent to", "Actions"].map((t) => (t === "Actions" ? h("th", {}, h("span", { class: "sr-only" }, t)) : h("th", {}, t))))),
       h("tbody", {}, ...d.items.map((c) => {
         const input = h("input", { type: "password", autocomplete: "off", maxlength: "4096", placeholder: c.saved ? "replace saved value" : "paste the credential", disabled: !d.unlocked, "aria-label": `New value for ${c.name}` });
         input.value = typed.get(c.name) || "";
+        // a saved value is sent only to the origin it was saved for: the well-known names default to their own app, any other name needs one
+        const origin = h("input", { type: "text", autocomplete: "off", maxlength: "300", placeholder: c.origin_required ? "https://app.example.org (required)" : "default: its own app", "aria-label": `Where ${c.name} may be sent` });
+        origin.value = typed.get(c.name + "#origin") ?? (c.origin && !c.origin.startsWith("${") ? c.origin : "");
+        origin.addEventListener("input", () => typed.set(c.name + "#origin", origin.value));
         input.addEventListener("input", () => typed.set(c.name, input.value));
         input.addEventListener("focus", () => { focused = c.name; });
         input.addEventListener("blur", () => { if (focused === c.name) focused = null; });
         if (focused === c.name) queueMicrotask(() => input.focus?.());
         const save = async () => {
           if (!input.value) return;
-          try { await api(`/api/credentials/${encodeURIComponent(c.name)}`, { method: "PUT", json: { value: input.value } }); input.value = ""; typed.delete(c.name); toast("Saved"); render(); } catch (err) { toast(err.message, true); }
+          try { await api(`/api/credentials/${encodeURIComponent(c.name)}`, { method: "PUT", json: { value: input.value, origin: origin.value.trim() || null } }); input.value = ""; typed.delete(c.name); typed.delete(c.name + "#origin"); toast("Saved"); render(); } catch (err) { toast(err.message, true); }
         };
         input.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); save(); } });
         return h("tr", {}, h("td", { class: "title" }, h("code", {}, c.name)),
           h("td", {}, c.source === "environment" ? "environment variable (wins)" : c.source === "saved" ? "saved here" : "not set"),
-          h("td", { class: "muted" }, c.used_by.join(", ") || "-"), h("td", {}, input),
+          h("td", { class: "muted" }, c.used_by.join(", ") || "-"), h("td", {}, input), h("td", {}, origin),
           h("td", { class: "actions" }, h("button", { class: "secondary small", type: "button", disabled: !d.unlocked, onclick: save }, "Save"),
             c.saved ? h("button", { class: "danger small", type: "button", onclick: async () => {
               if (!(await confirmDialog(`Delete the saved ${c.name}? Workloads that use it stop working.`, { title: "Delete saved credential", confirmLabel: "Delete", danger: true }))) return;

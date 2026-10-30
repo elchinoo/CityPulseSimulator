@@ -6,6 +6,7 @@ import re
 from dataclasses import asdict, dataclass, field
 from urllib.parse import urlparse
 
+from . import outbound
 from .catalog import DISTRICT_ID, TYPES
 from .errors import SpecError
 from .fleet import check_reference, is_reference
@@ -144,6 +145,7 @@ def parse_city(d: dict) -> City:
     if not isinstance(token_env, str) or not ENV_NAME.match(token_env) or "TOKEN" not in token_env:
         raise SpecError("token_env is the NAME of an environment variable that holds a token and contains 'TOKEN' "
                         "(e.g. CITYPULSE_INGEST_TOKEN), never the token itself")
+    outbound.check_token_env(token_env)
     seed = d.get("seed")
     if seed is not None and (isinstance(seed, bool) or not isinstance(seed, int) or not 0 <= seed < 2**32):
         raise SpecError("seed must be a whole number from 0 to 4294967295")

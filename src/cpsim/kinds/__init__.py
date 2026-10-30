@@ -7,7 +7,9 @@ import random
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
-from .. import credentials
+from apgkit.config import read_secret
+
+from .. import credentials, fleet, outbound
 from ..model import SpecError
 from ..tokens import LLMGW_USE, PAGERLENS_INGEST, SHOPFRONT_API, outbound_token
 from . import identity, llmgw, pagerlens, paybroker, shopfront, trustdesk
@@ -144,6 +146,15 @@ def kind_of(name) -> Kind:
     return KINDS[name]
 
 
+def _fallback(env: str, target: str) -> str:
+    """The app's own gateway key (LLM_API_KEY, what ecoctl injects for `llm: true`): it is the one credential a workload can name only
+    indirectly, and it goes only to the LLM gateway this app was given (LLMGW_URL), never to another address."""
+    value = read_secret(env)
+    if value and outbound.origin_of(target) and outbound.origin_of(target) == outbound.origin_of(fleet.value("LLMGW_URL")):
+        return value
+    return ""
+
+
 def credential(wl):
     """The credential for a workload's target: the static value of its variable, else a service token for the kind's scope.
 
@@ -155,10 +166,10 @@ def credential(wl):
         raise SpecError("CPSIM_SERVICE_CLIENT_SECRET is empty: the identity probe needs the simulator's service client")
     if not kind.token_env or not wl.target_url:
         return None
-    static = credentials.get(wl.token_env)
+    static = credentials.get(wl.token_env, wl.target_url)
     if not static and kind.fallback_env and wl.token_env == kind.token_env:
-        static = credentials.get(kind.fallback_env)
-    token = static or (outbound_token(wl.token_env, kind.scope) if kind.scope else None)
+        static = _fallback(kind.fallback_env, wl.target_url)
+    token = static or (outbound_token(wl.token_env, kind.scope, wl.target_url) if kind.scope else None)
     if not token and kind.token_optional:
         return None
     if not token:
@@ -178,7 +189,7 @@ def build_sender(wl, *, token=None, transport=None, rng: random.Random | None = 
     if wl.kind == "paybroker":
         pub = None
         if wl.publishable_env and wl.target_url:
-            key = credentials.get(wl.publishable_env)
+            key = credentials.get(wl.publishable_env, wl.target_url)
             if not key:
                 raise SpecError(f"no credential for {wl.publishable_env}: save a publishable key under Settings > Credentials, or set that environment variable")
             pub = Http(wl.target_url, key, transport=transport)

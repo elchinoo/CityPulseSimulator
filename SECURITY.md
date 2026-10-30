@@ -33,6 +33,21 @@ ingest token (validated as an upper-case variable name, so pasting a token there
 above (password hash, session and token hashes) are the only things persisted, in Postgres, which is required. The file store of the
 first release is retired (`cpsim import-files` loads it once).
 
+**Where requests may go, and what may be sent** (`outbound.py`)
+- Every target (city, company, workload, the PagerLens reporter, the PayBroker address a shop publishes) must be allow-listed and pass the
+  kit's NetGuard when something starts: private, loopback and link-local addresses are refused (`CPSIM_ALLOW_PRIVATE_URLS=true` allows private
+  and loopback, never link-local). The allow-list is the hosts of the ecosystem URLs the app was given (`CITYPULSE_URL`, `TRUSTDESK_URL`,
+  `PAYBROKER_URL`, `SHOPFRONT_URL`, `PAGERLENS_URL`, `LLMGW_URL`, `IDENTITY_URL`) plus `CPSIM_TARGET_ALLOWLIST` (hostnames, or `.domain` for
+  a domain and its subdomains).
+- A `token_env` (and `publishable_env`) must be on an explicit list: the default variables of the kinds (`CITYPULSE_INGEST_TOKEN`,
+  `TRUSTDESK_CLIENT_TOKEN`, `PAGERLENS_TOKEN`, `PAYBROKER_SECRET_KEY`, `PAYBROKER_PUBLISHABLE_KEY`, `LLMGW_CLIENT_KEY`, `SHOPFRONT_TOKEN`) plus
+  `CPSIM_TOKEN_ENV_ALLOWLIST`. `LLM_API_KEY` and `*_ENCRYPTION_KEY` can never be named; `LLM_API_KEY` is used only as the fallback key of a
+  gateway workload and only toward `LLMGW_URL`. Refusals name the variable, never a value.
+- A saved credential is bound to the origin it was saved for (a well-known name defaults to its own app, any other name needs an origin) and is
+  never sent anywhere else. A value from the environment is the operator's own choice and is not bound.
+- uvicorn trusts `X-Forwarded-*` only from `CPSIM_FORWARDED_ALLOW_IPS` (default `127.0.0.1`). Behind AgentPG's proxy set it to the proxy's address.
+- Limitation: the host is resolved once for the check and again by the HTTP client (a pinned connection needs a newer kit than the pinned one).
+
 **Untrusted input.** Every city is validated: names, numbers (finite, bounded), counts (a group at most 5,000, a city 10,000),
 sensor types and protocols from allow-lists, unknown fields rejected. The CityPulse URL must be `https` (plain `http` only for
 this machine), carry no credentials, query or fragment, and must not be a link-local address (cloud metadata). Requests are

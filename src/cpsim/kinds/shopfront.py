@@ -224,10 +224,12 @@ class ShopfrontSender(BaseSender):
         async with self._lock:
             if self.pb:
                 return self.pb
-            from .. import fleet
+            from .. import fleet, outbound
             try:
                 url = fleet.resolve(self.params["paybroker_url"], self.allow_http) if self.params["paybroker_url"] else \
                     check_target(str(info.payments.get("paybroker_url") or ""), allow_http=self.allow_http)
+                if url:            # an address the shop published is untrusted input: allow-list and NetGuard like any target
+                    outbound.check_url(url)
             except SpecError as exc:
                 return Result("client_error", error=f"PayBroker address for tokenizing cards: {exc}")
             key = str(info.payments.get("publishable_key") or "")

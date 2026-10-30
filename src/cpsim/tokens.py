@@ -41,9 +41,10 @@ def token_source(scope: str) -> TokenSource | None:
     return _sources[key]
 
 
-def outbound_token(env: str, scope: str) -> str | Callable[[], str] | None:
-    """The static token named by `env` if set, else a callable that returns a fresh service token for `scope`, else None."""
-    static = credentials.get(env)
+def outbound_token(env: str, scope: str, target: str) -> str | Callable[[], str] | None:
+    """The static token named by `env` if set (a saved one only for the origin it is bound to), else a callable that returns a fresh
+    service token for `scope`, else None. `target` is the address the token is for."""
+    static = credentials.get(env, target)
     if static:
         return static
     src = token_source(scope)

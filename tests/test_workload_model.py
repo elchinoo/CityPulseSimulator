@@ -129,6 +129,10 @@ def test_a_gateway_client_key_from_ecoctl_is_used_before_a_service_token(monkeyp
     for v in ("LLMGW_CLIENT_KEY", "LLM_API_KEY", "CPSIM_OIDC_ISSUER"):
         monkeypatch.delenv(v, raising=False)
     monkeypatch.setenv("LLM_API_KEY", "lg_from_ecoctl")
+    monkeypatch.delenv("LLMGW_URL", raising=False)
+    with pytest.raises(SpecError):
+        kinds.credential(gw)                       # the gateway key goes only to the gateway this app was given (LLMGW_URL), not to BASE's target
+    monkeypatch.setenv("LLMGW_URL", gw.target_url)
     assert kinds.credential(gw) == "lg_from_ecoctl"
     monkeypatch.setenv("LLMGW_CLIENT_KEY", "lg_chosen")
     assert kinds.credential(gw) == "lg_chosen", "the variable the workload names wins"

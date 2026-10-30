@@ -47,19 +47,19 @@ def provider(monkeypatch):
 def test_without_any_credential_there_is_no_token(monkeypatch):
     monkeypatch.delenv("CITYPULSE_INGEST_TOKEN", raising=False)
     monkeypatch.delenv("CPSIM_OIDC_ISSUER", raising=False)
-    assert tokens.outbound_token("CITYPULSE_INGEST_TOKEN", tokens.CITYPULSE_INGEST) is None
+    assert tokens.outbound_token("CITYPULSE_INGEST_TOKEN", tokens.CITYPULSE_INGEST, "https://citypulse.example") is None
 
 
 def test_a_static_token_wins(provider, monkeypatch):
     monkeypatch.setenv("CITYPULSE_INGEST_TOKEN", "static-ingest")
-    assert tokens.outbound_token("CITYPULSE_INGEST_TOKEN", tokens.CITYPULSE_INGEST) == "static-ingest"
+    assert tokens.outbound_token("CITYPULSE_INGEST_TOKEN", tokens.CITYPULSE_INGEST, "https://citypulse.example") == "static-ingest"
     assert provider.requests == []
 
 
 def test_one_token_per_callee_each_with_only_its_scope(provider):
-    cp = tokens.outbound_token("CITYPULSE_INGEST_TOKEN", tokens.CITYPULSE_INGEST)
-    td = tokens.outbound_token("TRUSTDESK_CLIENT_TOKEN", tokens.TRUSTDESK_CLIENT)
-    pl = tokens.outbound_token("PAGERLENS_TOKEN", tokens.PAGERLENS_INGEST)
+    cp = tokens.outbound_token("CITYPULSE_INGEST_TOKEN", tokens.CITYPULSE_INGEST, "https://citypulse.example")
+    td = tokens.outbound_token("TRUSTDESK_CLIENT_TOKEN", tokens.TRUSTDESK_CLIENT, "https://td.example")
+    pl = tokens.outbound_token("PAGERLENS_TOKEN", tokens.PAGERLENS_INGEST, "https://pl.example")
     assert callable(cp) and cp() == cp() and td().startswith("minted-trustdesk.requests.write") and pl().startswith("minted-pagerlens.ingest")
     assert cp().startswith("minted-citypulse.ingest")
     assert sorted(r["scope"] for r in provider.requests) == ["citypulse.ingest", "pagerlens.ingest", "trustdesk.requests.write"]   # cached: 3 calls only
@@ -120,7 +120,7 @@ def test_the_runtime_still_names_the_variable_when_nothing_is_configured(monkeyp
 
 
 async def test_the_trustdesk_client_authenticates_with_a_minted_token(provider):
-    td = tokens.outbound_token("TRUSTDESK_CLIENT_TOKEN", tokens.TRUSTDESK_CLIENT)
+    td = tokens.outbound_token("TRUSTDESK_CLIENT_TOKEN", tokens.TRUSTDESK_CLIENT, "https://td.example")
     seen = []
     client = TrustDeskClient("https://trustdesk.example", td)
     client.http._transport = httpx.MockTransport(lambda r: (seen.append(r.headers["authorization"]), httpx.Response(200, json={}))[1])

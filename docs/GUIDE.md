@@ -396,6 +396,10 @@ default file path.
 |---|---|---|
 | `CPSIM_MAX_RATE` | `200` | Ceiling on items per second, per workload and for all running workloads together. A workload above it is refused when saved; starting one that would push the total above it is refused. (Company runs are limited separately: at most 200 requests per second per company.) |
 | `CPSIM_ALLOW_HTTP_TARGETS` | off | `1`, `true` or `yes` allows plain `http` to hosts other than this machine **for workloads**, for local stand-ins reached by name. |
+| `CPSIM_TARGET_ALLOWLIST` | Extra hostnames a target may have (comma or space separated; `.domain` matches the domain and its subdomains). The hosts of the ecosystem URLs given by environment (`CITYPULSE_URL`, `TRUSTDESK_URL`, `PAYBROKER_URL`, `SHOPFRONT_URL`, `PAGERLENS_URL`, `LLMGW_URL`, `IDENTITY_URL`) are always allowed; any other host is refused when something starts. |
+| `CPSIM_ALLOW_PRIVATE_URLS` | `true` lets the NetGuard accept private and loopback addresses (local stand-ins). Link-local is never accepted. Default: refused. |
+| `CPSIM_TOKEN_ENV_ALLOWLIST` | Extra variable names a `token_env` may name, on top of the kinds' default variables. `LLM_API_KEY` and `*_ENCRYPTION_KEY` can never be added. |
+| `CPSIM_FORWARDED_ALLOW_IPS` | Peers whose `X-Forwarded-*` headers uvicorn believes. Default `127.0.0.1`; behind AgentPG's single proxy set that proxy's address. Never `*`. |
 | `CPSIM_POSITIONS` | on | `0`, `false`, `no` or `off` stops every city sending `lat`/`lon` (8.1.1); the per-city `positions` setting is the finer switch. |
 | `CPSIM_ATTRS` | on | `0`, `false`, `no` or `off` stops every city sending sensor `attrs` (8.1.2); the per-city `attrs` setting is the finer switch. |
 | `CPSIM_RESUME_ON_START` | on | Default of the "Resume what was running when the app restarts" switch (off for `0`, `false`, `no`, `off`). The switch under Settings overrides it. |

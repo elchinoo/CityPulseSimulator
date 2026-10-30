@@ -19,6 +19,7 @@ def client(monkeypatch, db):
     for v in ("CPSIM_API_KEY", "CPSIM_ALLOW_ANONYMOUS", "CPSIM_METRICS_TOKEN", "PAYBROKER_SECRET_KEY", "PAYBROKER_SECRET_KEY_FILE"):
         monkeypatch.delenv(v, raising=False)
     monkeypatch.setenv("CPSIM_ENCRYPTION_KEY", "platform-secret-for-tests")
+    monkeypatch.setenv("PAYBROKER_URL", "https://pb.example")           # the app a saved PAYBROKER_SECRET_KEY is bound to by default
     core.vault.lock()
     credentials._stored.clear()
     provider = Provider()
@@ -62,9 +63,9 @@ def test_it_survives_a_restart_and_the_environment_wins(client, monkeypatch):
     core.vault.lock()
     with db.connect() as conn:
         assert credentials.load(conn, core.vault)               # the platform secret unlocks it again
-    assert credentials.get("PAYBROKER_SECRET_KEY") == KEY
+    assert credentials.get("PAYBROKER_SECRET_KEY", "https://pb.example") == KEY
     monkeypatch.setenv("PAYBROKER_SECRET_KEY", "sk_test_FROM_ENV")
-    assert credentials.get("PAYBROKER_SECRET_KEY") == "sk_test_FROM_ENV" and credentials.source("PAYBROKER_SECRET_KEY") == "environment"
+    assert credentials.get("PAYBROKER_SECRET_KEY", "https://pb.example") == "sk_test_FROM_ENV" and credentials.source("PAYBROKER_SECRET_KEY") == "environment"
 
 
 def test_only_an_admin_may_read_or_change_them_and_names_are_restricted(client):
@@ -93,7 +94,7 @@ def test_delete_removes_it_and_a_workload_then_fails_with_a_clear_message(client
     admin = {**who("admin"), **CSRF}
     client.put("/api/credentials/PAYBROKER_SECRET_KEY", headers=admin, json={"value": KEY})
     assert client.delete("/api/credentials/PAYBROKER_SECRET_KEY", headers=admin).status_code == 200
-    assert credentials.get("PAYBROKER_SECRET_KEY") == ""
+    assert credentials.get("PAYBROKER_SECRET_KEY", "https://pb.example") == ""
     client.put("/api/workloads/shop", headers=admin, json=SPEC)
     r = client.post("/api/workloads/shop/run-once", headers=admin)
     assert r.status_code >= 400 and "Settings > Credentials" in r.text
@@ -136,3 +137,29 @@ def test_reset_admin_with_no_saved_credentials_asks_nothing_and_yes_skips_the_qu
     with db.connect() as conn:
         assert cli.reset_admin(conn, assume_yes=True, ask=never) is True
         assert conn.execute("SELECT count(*) AS n FROM cpsim_credential").fetchone()["n"] == 0
+
+
+def test_a_saved_credential_is_bound_to_an_origin_and_a_custom_name_needs_one(client, monkeypatch):
+    admin = {**who("admin"), **CSRF}
+    monkeypatch.setenv("CPSIM_TOKEN_ENV_ALLOWLIST", "MY_TOKEN")
+    # a name that belongs to no ecosystem app has no default origin: it must say where it may go, and only to an allow-listed host
+    assert client.put("/api/credentials/MY_TOKEN", headers=admin, json={"value": "t"}).status_code == 422
+    assert client.put("/api/credentials/MY_TOKEN", headers=admin, json={"value": "t", "origin": "https://evil.test"}).status_code == 422
+    assert client.put("/api/credentials/MY_TOKEN", headers=admin, json={"value": "t", "origin": "https://pb.example/v1"}).status_code == 200
+    item = next(i for i in client.get("/api/credentials", headers=admin).json()["items"] if i["name"] == "MY_TOKEN")
+    assert item["origin"] == "https://pb.example" and item["saved"]
+    # a name outside the list is refused outright
+    assert client.put("/api/credentials/LLM_API_KEY", headers=admin, json={"value": "t", "origin": "https://pb.example"}).status_code == 422
+    # it survives a restart with its origin, and is released only toward that origin
+    credentials._stored.clear()
+    credentials._origins.clear()
+    core.vault.lock()
+    with db.connect() as conn:
+        assert credentials.load(conn, core.vault)
+    assert credentials.get("MY_TOKEN", "https://pb.example") == "t"
+    with pytest.raises(Exception, match="bound to https://pb.example"):
+        credentials.get("MY_TOKEN", "https://other.example")
+    # a well-known name defaults to its own app (here the one PAYBROKER_URL names)
+    assert client.put("/api/credentials/PAYBROKER_SECRET_KEY", headers=admin, json={"value": KEY}).status_code == 200
+    got = next(i for i in client.get("/api/credentials", headers=admin).json()["items"] if i["name"] == "PAYBROKER_SECRET_KEY")
+    assert got["origin"] == "${PAYBROKER_URL}" and got["origin_required"] is False

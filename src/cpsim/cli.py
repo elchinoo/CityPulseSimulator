@@ -10,6 +10,12 @@ from urllib.parse import urlsplit
 from . import fleet, model
 
 
+def forwarded_allow_ips() -> str:
+    """Peers whose X-Forwarded-* headers are believed (comma-separated addresses or networks). Default: loopback only. Behind a reverse
+    proxy set CPSIM_FORWARDED_ALLOW_IPS to that proxy's address (AgentPG puts one proxy in front of an app); never '*'."""
+    return os.environ.get("CPSIM_FORWARDED_ALLOW_IPS", "").strip() or "127.0.0.1"
+
+
 def _serve() -> None:
     import uvicorn
 
@@ -17,7 +23,7 @@ def _serve() -> None:
 
     migrate.run()
     uvicorn.run("cpsim.api:app", host=os.environ.get("HOST", "127.0.0.1"), port=int(os.environ.get("PORT", "8000")),
-                proxy_headers=True, forwarded_allow_ips="*", log_level=os.environ.get("LOG_LEVEL", "info"))
+                proxy_headers=True, forwarded_allow_ips=forwarded_allow_ips(), log_level=os.environ.get("LOG_LEVEL", "info"))
 
 
 def _load(path: str) -> model.City:
@@ -66,7 +72,7 @@ async def _run_company(company, dry: bool) -> int:
     make = None
     if company.target_url and not dry:
         company = Runtime.resolved(company)          # a fleet reference becomes the address of the environment (SpecError: exit 2)
-        token = outbound_token(company.token_env, TRUSTDESK_CLIENT)
+        token = outbound_token(company.token_env, TRUSTDESK_CLIENT, company.target_url)
         if not token:
             sys.exit(f"{company.token_env} is empty: set it to a TrustDesk client token (or configure CPSIM_SERVICE_CLIENT_SECRET)")
 

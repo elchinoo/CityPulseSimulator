@@ -13,9 +13,20 @@ from apgkit.web import is_https, mount_kit_static, public_url
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
-from . import __version__, auth, citygen, core, credentials, fleet, hardening, metrics, reporter
+from . import (
+    __version__,
+    auth,
+    citygen,
+    core,
+    credentials,
+    fleet,
+    hardening,
+    metrics,
+    outbound,
+    reporter,
+)
 from .catalog import DISTRICT_KINDS, DISTRICTS, GROUPS, TYPES
 from .core import COOKIE, CSRF_HEADER, fed, local
 from .districts import KINDS as DISTRICT_KIND_NAMES
@@ -338,7 +349,9 @@ def revoke_token(token_id: int):
 # --- credentials the simulator presents to the apps it drives ----------------------------------------------
 
 class CredentialBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     value: str = Field(min_length=1, max_length=4096)
+    origin: str | None = Field(None, max_length=300)         # where it may be sent; optional for the well-known names (their own app)
 
 
 def _credential_users() -> dict[str, list[str]]:
@@ -397,8 +410,10 @@ def list_credentials():
     names = {k.token_env for k in KINDS.values() if k.token_env} | {"CITYPULSE_INGEST_TOKEN", "TRUSTDESK_CLIENT_TOKEN"} | set(users)
     with core.db.connect() as conn:
         saved = credentials.saved_names(conn)
+    names |= saved
     return {"unlocked": core.vault.is_unlocked(),
-            "items": [{"name": n, "source": credentials.source(n), "saved": n in saved, "used_by": sorted(users.get(n, []))}
+            "items": [{"name": n, "source": credentials.source(n), "saved": n in saved, "used_by": sorted(users.get(n, [])),
+                       "origin": credentials.bound_origin(n) if n in saved else "", "origin_required": n not in outbound.DEFAULT_TOKEN_ENVS}
                       for n in sorted(names)]}
 
 
@@ -406,7 +421,7 @@ def list_credentials():
 def save_credential(name: str, body: CredentialBody):
     try:
         with core.db.connect() as conn:
-            credentials.put(conn, core.vault, name, body.value)
+            credentials.put(conn, core.vault, name, body.value, body.origin)
     except SpecError as exc:
         raise HTTPException(409 if "locked" in str(exc) else 422, str(exc)) from exc
     return {"name": name, "source": credentials.source(name)}

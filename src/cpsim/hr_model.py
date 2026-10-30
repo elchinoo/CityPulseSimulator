@@ -6,6 +6,7 @@ import math
 import re
 from dataclasses import asdict, dataclass, field
 
+from . import outbound
 from .hr_catalog import TYPES
 from .model import ENV_NAME, NAME, SpecError, check_target
 from .schedule import parse_company_schedule
@@ -68,6 +69,7 @@ def parse_company(d: dict) -> Company:
     if not isinstance(token_env, str) or not ENV_NAME.match(token_env) or "TOKEN" not in token_env:
         raise SpecError("token_env is the NAME of an environment variable that holds a token and contains 'TOKEN' "
                         "(e.g. TRUSTDESK_CLIENT_TOKEN), never the token itself")
+    outbound.check_token_env(token_env)
     seed = d.get("seed")
     if seed is not None:
         seed = _whole(seed, "seed", 0, 2**32 - 1)

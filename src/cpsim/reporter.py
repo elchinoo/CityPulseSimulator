@@ -10,7 +10,7 @@ import time
 
 import httpx
 
-from . import __version__
+from . import __version__, outbound
 from .config import get_settings
 from .model import SpecError, check_target
 from .tokens import PAGERLENS_INGEST, BearerAuth, outbound_token
@@ -71,12 +71,14 @@ class Reporter:
 
 def maybe_start(runtime) -> Reporter | None:
     cfg = get_settings()
-    token = cfg.pagerlens_token or outbound_token("PAGERLENS_TOKEN", PAGERLENS_INGEST)
-    if not (cfg.pagerlens_url and token):
-        return None
-    try:       # the rules of a workload's target: https, or http for this machine (or anywhere with CPSIM_ALLOW_HTTP_TARGETS)
-        check_target(cfg.pagerlens_url, allow_http=allow_http_targets())
+    try:       # the rules of a workload's target: https, or http for this machine (or anywhere with CPSIM_ALLOW_HTTP_TARGETS), then the NetGuard
+        if cfg.pagerlens_url:
+            check_target(cfg.pagerlens_url, allow_http=allow_http_targets())
+            outbound.check_url(cfg.pagerlens_url)
+        token = cfg.pagerlens_token or outbound_token("PAGERLENS_TOKEN", PAGERLENS_INGEST, cfg.pagerlens_url)
     except SpecError as exc:
         print(f"reporter: refusing PAGERLENS_URL, {exc}", file=sys.stderr)
+        return None
+    if not (cfg.pagerlens_url and token):
         return None
     return Reporter(cfg.pagerlens_url, token, runtime)

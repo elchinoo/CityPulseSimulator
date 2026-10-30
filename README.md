@@ -381,6 +381,10 @@ city page shows each endpoint). Endpoints bind to loopback unless you tick *Let 
 | `CPSIM_RESUME_ON_START` | Default of the *Resume what was running when the app restarts* switch (on unless `false`); the switch under Settings overrides it. See *Resuming after a restart*. |
 | `CPSIM_RESUME_STAGGER_SECONDS` | Seconds between two resumed items (default 1, at most 60; 0 starts them back to back). |
 | `CPSIM_ALLOW_HTTP_TARGETS` | `true` allows plain `http` to hosts other than this machine, for local stand-ins reached by name (default off: `https` or localhost only). |
+| `CPSIM_TARGET_ALLOWLIST` | Extra hostnames a target may have (comma or space separated; `.domain` matches the domain and its subdomains). The hosts of the ecosystem URLs given by environment (`CITYPULSE_URL`, `TRUSTDESK_URL`, `PAYBROKER_URL`, `SHOPFRONT_URL`, `PAGERLENS_URL`, `LLMGW_URL`, `IDENTITY_URL`) are always allowed; any other host is refused when something starts. |
+| `CPSIM_ALLOW_PRIVATE_URLS` | `true` lets the NetGuard accept private and loopback addresses (local stand-ins). Link-local is never accepted. Default: refused. |
+| `CPSIM_TOKEN_ENV_ALLOWLIST` | Extra variable names a `token_env` may name, on top of the kinds' default variables. `LLM_API_KEY` and `*_ENCRYPTION_KEY` can never be added. |
+| `CPSIM_FORWARDED_ALLOW_IPS` | Peers whose `X-Forwarded-*` headers uvicorn believes. Default `127.0.0.1`; behind AgentPG's single proxy set that proxy's address. Never `*`. |
 | `CPSIM_ALLOW_ANONYMOUS` | Demo only: disables authentication entirely. |
 
 ## Resuming after a restart

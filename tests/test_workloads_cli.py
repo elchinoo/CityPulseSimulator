@@ -57,6 +57,8 @@ def env(**kw):
     e.pop("TEST_DATABASE_URL", None)
     e["DATABASE_URL"] = "postgresql://nobody:nopw@127.0.0.1:9/none"      # nothing listens here: any attempt to use Postgres fails loudly
     e["PYTHONUNBUFFERED"] = "1"
+    e["CPSIM_ALLOW_PRIVATE_URLS"] = "true"                   # the stand-ins listen on 127.0.0.1
+    e["CPSIM_TARGET_ALLOWLIST"] = "127.0.0.1 localhost"
     e.update(kw)
     return e
 
@@ -97,13 +99,14 @@ def test_a_workload_file_runs_without_postgres_and_prints_status(tmp_path, pb):
     assert 4 <= ticks <= 6, last
 
 
-def test_a_non_local_target_is_announced_in_one_line_and_the_key_stays_out_of_the_output(tmp_path):
+def test_a_target_that_is_not_allow_listed_or_does_not_resolve_is_refused_before_anything_is_sent(tmp_path):
     f = write(tmp_path, PB_FILE.replace("${PAYBROKER_URL}", "https://live.paybroker.invalid"))
-    r = cpsim("workloads", "run", f, "--seconds", "1.5", "--status-every", "1", environ=env(PAYBROKER_SECRET_KEY=KEY))
-    notices = [ln for ln in r.stdout.splitlines() if ln.startswith("notice:")]
-    assert notices == ["notice: shop sends simulated traffic to https://live.paybroker.invalid (not localhost)"], r.stdout
-    assert r.returncode == 0                   # an unreachable target is not a misconfiguration: it is counted as network_error
-    assert "network_error" in r.stdout and KEY not in r.stdout + r.stderr
+    r = cpsim("workloads", "run", f, "--seconds", "1.5", "--status-every", "1", environ=env(PAYBROKER_SECRET_KEY=KEY, CPSIM_TARGET_ALLOWLIST="127.0.0.1"))
+    assert r.returncode == 2 and "not an allowed target" in r.stderr and "live.paybroker.invalid" in r.stderr
+    assert KEY not in r.stdout + r.stderr
+    r = cpsim("workloads", "run", f, "--seconds", "1.5", "--status-every", "1", environ=env(PAYBROKER_SECRET_KEY=KEY, CPSIM_TARGET_ALLOWLIST=".invalid"))
+    assert r.returncode == 2 and "cannot resolve" in r.stderr           # the NetGuard resolves the host before a credential goes anywhere
+    assert KEY not in r.stdout + r.stderr
 
 
 def test_fatal_misconfiguration_exits_non_zero_with_a_clear_message(tmp_path, pb):

@@ -4,7 +4,7 @@ import math
 import os
 from dataclasses import replace
 
-from . import fleet, kinds
+from . import fleet, kinds, outbound
 from .engine import CityRunner
 from .hr_engine import HrRun, TrustDeskClient
 from .hr_model import Company, parse_company
@@ -83,12 +83,15 @@ class Runtime:
     def resolved(spec, allow_http: bool = False):
         """The spec with its fleet reference (`${CITYPULSE_URL}`) replaced by the address the environment holds NOW, checked with the
         usual URL rules; raises SpecError when it does not resolve. Used at start time only: what is stored keeps the reference."""
-        return replace(spec, target_url=fleet.resolve(spec.target_url, allow_http))
+        resolved = replace(spec, target_url=fleet.resolve(spec.target_url, allow_http))
+        if resolved.target_url:
+            outbound.check_url(resolved.target_url)      # allow-listed host, and the NetGuard (no private or link-local address)
+        return resolved
 
     def _sink(self, city: City):
         if not city.target_url:
             return NullSink()
-        token = outbound_token(city.token_env, CITYPULSE_INGEST)
+        token = outbound_token(city.token_env, CITYPULSE_INGEST, city.target_url)
         if not token:
             raise SpecError(f"no credential for {city.token_env}: save an ingest token for {city.target_url} under Settings > Credentials, or set that environment variable "
                             "(or configure the service client of the identity provider: see CPSIM_SERVICE_CLIENT_SECRET)")
@@ -205,7 +208,7 @@ class Runtime:
         company = self.resolved(company)
         if not company.target_url:
             return None
-        token = outbound_token(company.token_env, TRUSTDESK_CLIENT)
+        token = outbound_token(company.token_env, TRUSTDESK_CLIENT, company.target_url)
         if not token:
             raise SpecError(f"no credential for {company.token_env}: save a TrustDesk "
                             f"client token for {company.target_url} under Settings > Credentials, or set that environment variable "

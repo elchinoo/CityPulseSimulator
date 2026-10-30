@@ -7,6 +7,7 @@ import os
 import re
 from dataclasses import dataclass, field
 
+from . import outbound
 from .kinds import KINDS, MANAGED_ELSEWHERE, kind_of
 from .model import ENV_NAME, NAME, SpecError, check_target
 from .schedule import Schedule, max_rate, parse_schedule
@@ -41,7 +42,7 @@ def check_secret_env(value, what: str = "token_env") -> str:
             or value.endswith("_FILE")):
         raise SpecError(f"{what} is the NAME of an environment variable that holds a credential (it must contain TOKEN, KEY or SECRET, "
                         "e.g. PAYBROKER_SECRET_KEY), never the credential itself; the simulator's own variables are not allowed")
-    return value
+    return outbound.check_token_env(value, what)
 
 
 def allow_http_targets() -> bool:
