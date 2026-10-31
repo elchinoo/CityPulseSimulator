@@ -474,6 +474,14 @@ it, so use a dedicated, narrow `ingest` token that you can revoke. Free-tier san
 resumed sandbox restarts cities that have *Start this city when the app starts* ticked. The full walkthrough for all four
 projects is in the CityPulse tutorial.
 
+### Sealed boot
+
+Anything in an app's environment, config or image can be read by whoever reads the platform's configuration. With sealed boot the only thing to deploy is
+`APGKIT_SEALED`, one encrypted blob (AES-256-GCM under an operator passphrase) holding `DATABASE_URL`, `CPSIM_OIDC_CLIENT_SECRET`, `CPSIM_METRICS_TOKEN`, the
+credentials for the apps it drives and the rest. The app starts sealed (503 except `/_seal/*` and `/healthz`); the operator sends the passphrase, the app opens the
+blob, runs its migrations, unlocks its vault with the same passphrase and serves. Make the blob and unseal with `ecoctl seal` from agentpg-ecosystem. Without
+`APGKIT_SEALED` nothing changes.
+
 ## Tests
 
 ```bash

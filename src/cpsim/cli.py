@@ -18,10 +18,12 @@ def forwarded_allow_ips() -> str:
 
 def _serve() -> None:
     import uvicorn
+    from apgkit import sealed as sealing
 
     from . import migrate
 
-    migrate.run()
+    if not sealing.Sealed.from_env().enabled:      # sealed: the database URL is not known yet, the app migrates after unseal
+        migrate.run()
     uvicorn.run("cpsim.api:app", host=os.environ.get("CPSIM_HOST") or os.environ.get("HOST") or "127.0.0.1", port=int(os.environ.get("PORT", "8000")),
                 proxy_headers=True, forwarded_allow_ips=forwarded_allow_ips(), log_level=os.environ.get("LOG_LEVEL", "info"))
 

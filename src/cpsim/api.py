@@ -6,10 +6,11 @@ from pathlib import Path
 
 import psycopg
 from apgkit import insights, masking
+from apgkit import sealed as sealing
 from apgkit.auth.rp import BINDING_COOKIE, clear_binding, safe_return_to
 from apgkit.config import env_bool
 from apgkit.guard import SecurityGuard
-from apgkit.vault import VaultError
+from apgkit.vault import VaultError, sealed_unlocker
 from apgkit.web import is_https, mount_kit_static, public_url
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
@@ -130,7 +131,20 @@ def _db_unavailable() -> HTTPException:
     return core.auth.db_unavailable()
 
 
-app = FastAPI(title="CityPulse Simulator", version=__version__, lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
+# Sealed boot: with APGKIT_SEALED set the app starts sealed (nothing but /_seal/*, /healthz) and the lifespan, which uses the database, runs only
+# after the operator unseals it. Without a blob nothing changes.
+sealed = sealing.Sealed.from_env()
+app = FastAPI(title="CityPulse Simulator", version=__version__, lifespan=sealed.deferred(lifespan), docs_url=None, redoc_url=None, openapi_url=None)
+sealing.install(app, sealed)
+
+
+def _migrate_after_unseal(_sealed, _passphrase) -> None:
+    from . import migrate
+    migrate.run()          # `cpsim serve` cannot do it before the server starts: the database URL is itself sealed
+
+
+sealed.on_unsealed(_migrate_after_unseal)                       # first: the vault's tables must exist
+sealed.on_unsealed(sealed_unlocker(core.vault, core.db.connect))
 app.add_middleware(SecurityGuard, csrf_header=CSRF_HEADER, max_body=MAX_BODY, observe=core.metrics.observe)
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
 mount_kit_static(app)

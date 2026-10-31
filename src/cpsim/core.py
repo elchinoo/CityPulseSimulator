@@ -8,6 +8,8 @@ import os
 
 from apgkit import metrics as metrics_mod
 from apgkit.auth import AppAuth, Authenticator, LocalAuth, Principal, from_env
+from apgkit.auth.env import Federation
+from apgkit.auth.rp import RelyingParty
 from apgkit.config import env_bool, read_secret
 from apgkit.db import Database
 from apgkit.vault import Vault
@@ -43,7 +45,18 @@ SCOPE_PERMISSIONS = {
     # scopes the identity provider can grant to services
     "cpsim.read": frozenset({"sim:read"}), "cpsim.metrics": frozenset({"metrics:scrape"}),
 }
-fed = from_env("CPSIM", APP)
+
+
+def _federation() -> Federation:
+    """The SSO settings. The relying party always gets the secret as a function (read when a login needs it, not at import): with sealed
+    boot the client secret only exists after unseal, and without it the client would be built as a public one for good."""
+    f = from_env("CPSIM", APP)
+    if f.rp is None:
+        return f
+    return Federation(f.issuer, f.client_id, f.verifier, RelyingParty(f.issuer, f.client_id, lambda: read_secret("CPSIM_OIDC_CLIENT_SECRET")), f.local_login)
+
+
+fed = _federation()
 APP_AUTH = AppAuth(APP, fed.client_id, ROLE_PERMISSIONS, SCOPE_PERMISSIONS)
 
 local = LocalAuth(APP_AUTH, env_prefix="CPSIM", token_prefix="cs_", token_scopes={"read", "metrics", "full"}, vault=vault)
