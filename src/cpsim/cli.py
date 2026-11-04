@@ -301,6 +301,48 @@ def reset_admin(conn, assume_yes: bool = False, ask=input) -> bool:
     return True
 
 
+def _aidb_bench(args) -> int:
+    """`cpsim aidb-bench`: see docs/AIDB-BENCH.md. The target DSN is asked for (hidden) or read from CPSIM_AIDB_DSN; it is never printed."""
+    from .aidbbench import runner, scenarios, target
+
+    try:
+        dsn = target.get_dsn()
+    except target.TargetRefused as exc:
+        print(f"cpsim: {exc}", file=sys.stderr)
+        return runner.EXIT_MISCONFIGURED
+    if args.check:
+        return runner.check(dsn, args.allow_any_database)
+    names = tuple(n.strip() for n in args.scenarios.split(",") if n.strip())
+    bad = [n for n in names if n not in scenarios.SCENARIOS]
+    if bad or not names:
+        raise model.SpecError(f"--scenarios takes {', '.join(scenarios.SCENARIOS)}; not {', '.join(bad) or 'nothing'}")
+    try:
+        levels = tuple(int(x) for x in args.conversations.split(",") if x.strip())
+    except ValueError as exc:
+        raise model.SpecError("--conversations is a comma list of whole numbers") from exc
+    if not levels or any(not 1 <= n <= 64 for n in levels):
+        raise model.SpecError("--conversations: each count must be from 1 to 64")
+    for flag, value, lo, hi in (("--sensors", args.sensors, 8, 10_000), ("--writers", args.writers, 1, 16), ("--batch", args.batch, 1, 1000),
+                                ("--readers", args.readers, 1, 64), ("--rounds", args.rounds, 1, 100), ("--turns", args.turns, 1, 10),
+                                ("--gov-conversations", args.gov_conversations, 1, 64), ("--gov-reps", args.gov_reps, 1, 20), ("-k", args.k, 1, 100),
+                                ("--history", args.history, 1, 100)):
+        if not lo <= value <= hi:
+            raise model.SpecError(f"{flag} must be from {lo} to {hi}")
+    for flag, value in (("--duration", args.duration), ("--retrieval-seconds", args.retrieval_seconds), ("--insert-rate", args.insert_rate),
+                        ("--model-delay", args.model_delay), ("--sync-interval", args.sync_interval), ("--call-timeout", args.call_timeout), ("--probe-every", args.probe_every)):
+        if value < 0 or (value == 0 and flag in ("--duration", "--retrieval-seconds", "--call-timeout", "--sync-interval")):
+            raise model.SpecError(f"{flag} must be positive")
+    params = scenarios.Params(
+        scenarios=names, sensors=args.sensors, seed=args.seed, profile=args.profile, history=args.history, duration=args.duration,
+        insert_rate=args.insert_rate, pipeline_modes=("live", "background") if args.pipeline_mode == "both" else (args.pipeline_mode,),
+        sync_interval=args.sync_interval, writers=args.writers, batch=args.batch, probe_every=max(args.probe_every, 0.2), probe_timeout=args.probe_timeout,
+        drain_timeout=args.drain_timeout, readers=args.readers, retrieval_seconds=args.retrieval_seconds, k=args.k, conversations=levels,
+        rounds=args.rounds, turns=args.turns, gov_conversations=args.gov_conversations, gov_reps=args.gov_reps, model=args.model,
+        model_delay=args.model_delay, call_timeout=args.call_timeout, callback_host=args.callback_host, enable_telemetry=args.enable_telemetry,
+        keep=args.keep)
+    return runner.run(dsn, params, args.out, args.hardware_note, args.allow_any_database)
+
+
 def main(argv: list[str] | None = None) -> None:
     p = argparse.ArgumentParser(prog="cpsim", description="CityPulse Simulator: cities of simulated sensors speaking industrial protocols.")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -340,6 +382,45 @@ def main(argv: list[str] | None = None) -> None:
     cg.add_argument("--token-env", default="CITYPULSE_INGEST_TOKEN", help="the NAME of the variable holding the ingest token")
     cg.add_argument("--autostart", action="store_true", help="mark the cities to start when the app starts")
     cg.add_argument("-v", "--verbose", action="store_true", help="list each city's districts and sensor types")
+    ab = sub.add_parser("aidb-bench", help="optional: use the simulator as the load and workload generator for EDB AI Accelerator (AIDB): pipeline "
+                        "throughput, retrieval latency, agent concurrency, governance overhead; writes a JSON and a Markdown report (indicative)")
+    ab.add_argument("--check", action="store_true", help="only validate the target (allow-list, address, database name) and report whether AIDB is usable")
+    ab.add_argument("--scenarios", default="pipeline,retrieval,agents,governance", help="comma list of pipeline, retrieval, agents, governance (default all)")
+    ab.add_argument("--sensors", type=int, default=200, help="city size, 8 to 10000 (default 200)")
+    ab.add_argument("--seed", type=int, default=1)
+    ab.add_argument("--profile", default="mixed")
+    ab.add_argument("--history", type=int, default=1, help="preloaded observations per sensor (default 1)")
+    ab.add_argument("--duration", type=float, default=20.0, help="seconds of sustained inserts in the pipeline scenario (default 20)")
+    ab.add_argument("--insert-rate", type=float, default=50.0, help="rows/s offered while measuring; 0 = as fast as the writers can (default 50)")
+    ab.add_argument("--writers", type=int, default=2)
+    ab.add_argument("--batch", type=int, default=10, help="rows per insert transaction (default 10)")
+    ab.add_argument("--pipeline-mode", choices=("both", "live", "background"), default="both", help="pipeline auto-processing mode(s) to measure: Live "
+                    "(embedding inside the inserting transaction) and/or Background (a worker drains a backlog) (default both)")
+    ab.add_argument("--sync-interval", type=float, default=2.0, help="background_sync_interval in seconds for Background mode (default 2)")
+    ab.add_argument("--probe-every", type=float, default=2.0, help="seconds between freshness probe rows (default 2)")
+    ab.add_argument("--probe-timeout", type=float, default=120.0)
+    ab.add_argument("--drain-timeout", type=float, default=300.0)
+    ab.add_argument("--readers", type=int, default=2, help="parallel retrieval clients (default 2)")
+    ab.add_argument("--retrieval-seconds", type=float, default=10.0, help="seconds per backend and pass (default 10)")
+    ab.add_argument("-k", type=int, default=5)
+    ab.add_argument("--conversations", default="1,4,8", help="comma list of parallel conversation counts for the agent scenario (default 1,4,8)")
+    ab.add_argument("--rounds", type=int, default=3, help="conversations per thread (default 3)")
+    ab.add_argument("--turns", type=int, default=2, help="calls per conversation (default 2)")
+    ab.add_argument("--gov-conversations", type=int, default=4)
+    ab.add_argument("--gov-reps", type=int, default=3, help="interleaved repetitions of the governance comparison (default 3)")
+    ab.add_argument("--model", choices=("fake", "dummy", "endpoint"), default="fake",
+                    help="fake: a scripted OpenAI-compatible server run by this command; dummy: AIDB's built-in dummy model; endpoint: "
+                    "CPSIM_AIDB_CHAT_URL (allow-listed) with the key in the variable named by CPSIM_AIDB_CHAT_KEY_ENV")
+    ab.add_argument("--model-delay", type=float, default=0.2, help="seconds the scripted model adds to each answer (default 0.2)")
+    ab.add_argument("--call-timeout", type=float, default=60.0)
+    ab.add_argument("--callback-host", default="", help="address of this machine as the database server sees it (default CPSIM_AIDB_CALLBACK_HOST "
+                    "or 192.168.65.254, Docker Desktop's)")
+    ab.add_argument("--enable-telemetry", action="store_true", help="set aidb.otel_client=database on the target database for the run (needs the "
+                    "database owner; undone at the end) so purpose decisions are recorded")
+    ab.add_argument("--out", default="aidb-bench-reports", help="directory for the JSON and Markdown report (default ./aidb-bench-reports)")
+    ab.add_argument("--hardware-note", default="", help="free text recorded in the report, for example 'Docker Desktop 8 CPUs 16 GB on a laptop'")
+    ab.add_argument("--keep", action="store_true", help="keep the cpsim_bench objects afterwards (default: remove them)")
+    ab.add_argument("--allow-any-database", action="store_true", help="allow a target database whose name does not end in bench or test")
     sub.add_parser("migrate", help="apply the SQL migrations (serve does this at start)")
     imp = sub.add_parser("import-files", help="one-shot upgrade: load cities and companies saved by the first release's file store")
     imp.add_argument("directory", help="the old CPSIM_DATA_DIR (holds state.json)")
@@ -388,6 +469,8 @@ def main(argv: list[str] | None = None) -> None:
             sys.exit(asyncio.run(_run_workloads(args.file, args.only, args.seconds, args.dry_run, max(args.status_every, 0.5))))
         elif args.cmd == "cities":
             sys.exit(_generate_cities(args))
+        elif args.cmd == "aidb-bench":
+            sys.exit(_aidb_bench(args))
         elif args.cmd == "migrate":
             from . import migrate
 

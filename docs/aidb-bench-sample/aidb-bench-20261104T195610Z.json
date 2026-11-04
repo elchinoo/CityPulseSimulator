@@ -1,0 +1,1079 @@
+{
+  "city": {
+    "districts": 6,
+    "name": "bench-city",
+    "preloaded_rows": 1000,
+    "seed": 1,
+    "sensors": 200,
+    "types": 18
+  },
+  "disclaimer": "INDICATIVE ONLY. These numbers come from one run on the machine and database described below (for example Docker Desktop on a laptop: shared CPU, a virtual disk, a client and a server competing for the same cores). They are not a benchmark of AIDB, of EDB Postgres AI or of any platform, they are not comparable across machines, and they say nothing about quality of answers. Repeat the run on your own target before relying on any figure.",
+  "finished_at": "2026-11-04T20:02:44Z",
+  "hardware": {
+    "client": {
+      "cpus": 14,
+      "machine": "arm64",
+      "os": "Darwin 25.6.0",
+      "python": "3.13.5",
+      "ram_bytes": 51539607552
+    },
+    "note": "Docker Desktop on a MacBook (Apple M4 Pro host, 14 cores / 48 GB; the Docker VM sees 8 CPUs / 15.4 GB); client and database share the machine; nothing else was running",
+    "server_host_best_effort": {
+      "cgroup_cpu_max": "max 100000",
+      "cgroup_memory_max": "max",
+      "cpus_seen_by_server_os": 8,
+      "ram_bytes_seen_by_server_os": 16484397056
+    }
+  },
+  "indicative": true,
+  "notes": [
+    "agent model: fake, 0.2 s per answer"
+  ],
+  "parameters": {
+    "batch": 10,
+    "call_timeout": 60.0,
+    "conversations": [
+      1,
+      4,
+      8
+    ],
+    "drain_timeout": 300.0,
+    "duration": 30.0,
+    "enable_telemetry": true,
+    "gov_conversations": 4,
+    "gov_reps": 3,
+    "history": 5,
+    "insert_rate": 50.0,
+    "k": 5,
+    "keep": false,
+    "model": "fake",
+    "model_delay": 0.2,
+    "pipeline_modes": [
+      "live",
+      "background"
+    ],
+    "probe_every": 1.0,
+    "probe_timeout": 120.0,
+    "profile": "mixed",
+    "readers": 2,
+    "retrieval_seconds": 15.0,
+    "rounds": 3,
+    "scenarios": [
+      "pipeline",
+      "retrieval",
+      "agents",
+      "governance"
+    ],
+    "seed": 1,
+    "sensors": 200,
+    "sync_interval": 2.0,
+    "turns": 2,
+    "writers": 2
+  },
+  "scenarios": {
+    "agents": {
+      "agent": "governed (purpose)",
+      "levels": {
+        "1": {
+          "call_latency": {
+            "error_kinds": {},
+            "errors": 0,
+            "max_ms": 469.2,
+            "mean_ms": 338.97,
+            "min_ms": 219.834,
+            "n": 6,
+            "p50_ms": 331.255,
+            "p95_ms": 466.177,
+            "p99_ms": 468.595
+          },
+          "calls_ok_per_s": 2.94,
+          "conversation_latency": {
+            "error_kinds": {},
+            "errors": 0,
+            "max_ms": 689.056,
+            "mean_ms": 677.96,
+            "min_ms": 655.936,
+            "n": 3,
+            "p50_ms": 688.889,
+            "p95_ms": 689.04,
+            "p99_ms": 689.053
+          },
+          "conversations_per_thread": 3,
+          "model_server": {
+            "delay_s": 0.2,
+            "max_in_flight": 1,
+            "requests": 9
+          },
+          "outcomes": {
+            "error": 0,
+            "ok": 6,
+            "timeout": 0
+          },
+          "threads": 1,
+          "turns_per_conversation": 2,
+          "wall_seconds": 2.04
+        },
+        "4": {
+          "call_latency": {
+            "error_kinds": {},
+            "errors": 0,
+            "max_ms": 485.743,
+            "mean_ms": 352.247,
+            "min_ms": 229.333,
+            "n": 24,
+            "p50_ms": 348.965,
+            "p95_ms": 485.153,
+            "p99_ms": 485.619
+          },
+          "calls_ok_per_s": 11.27,
+          "conversation_latency": {
+            "error_kinds": {},
+            "errors": 0,
+            "max_ms": 719.349,
+            "mean_ms": 704.507,
+            "min_ms": 696.368,
+            "n": 12,
+            "p50_ms": 699.394,
+            "p95_ms": 718.214,
+            "p99_ms": 719.122
+          },
+          "conversations_per_thread": 3,
+          "model_server": {
+            "delay_s": 0.2,
+            "max_in_flight": 4,
+            "requests": 36
+          },
+          "outcomes": {
+            "error": 0,
+            "ok": 24,
+            "timeout": 0
+          },
+          "threads": 4,
+          "turns_per_conversation": 2,
+          "wall_seconds": 2.13
+        },
+        "8": {
+          "call_latency": {
+            "error_kinds": {},
+            "errors": 0,
+            "max_ms": 493.085,
+            "mean_ms": 356.469,
+            "min_ms": 227.957,
+            "n": 48,
+            "p50_ms": 354.04,
+            "p95_ms": 491.147,
+            "p99_ms": 492.855
+          },
+          "calls_ok_per_s": 22.25,
+          "conversation_latency": {
+            "error_kinds": {},
+            "errors": 0,
+            "max_ms": 735.723,
+            "mean_ms": 712.947,
+            "min_ms": 692.001,
+            "n": 24,
+            "p50_ms": 705.906,
+            "p95_ms": 735.527,
+            "p99_ms": 735.68
+          },
+          "conversations_per_thread": 3,
+          "model_server": {
+            "delay_s": 0.2,
+            "max_in_flight": 8,
+            "requests": 72
+          },
+          "outcomes": {
+            "error": 0,
+            "ok": 48,
+            "timeout": 0
+          },
+          "threads": 8,
+          "turns_per_conversation": 2,
+          "wall_seconds": 2.16
+        }
+      },
+      "model": "fake"
+    },
+    "governance": {
+      "calls_per_pass": 12,
+      "conversations": 4,
+      "decisions_recorded": 36,
+      "governed": {
+        "p50_ms_per_pass": [
+          464.6,
+          463.297,
+          459.491
+        ],
+        "p95_ms_per_pass": [
+          488.795,
+          466.519,
+          487.624
+        ],
+        "passes": [
+          {
+            "call_latency": {
+              "error_kinds": {},
+              "errors": 0,
+              "max_ms": 488.977,
+              "mean_ms": 471.815,
+              "min_ms": 461.317,
+              "n": 12,
+              "p50_ms": 464.6,
+              "p95_ms": 488.795,
+              "p99_ms": 488.94
+            },
+            "calls_ok_per_s": 8.4,
+            "outcomes": {
+              "error": 0,
+              "ok": 12,
+              "timeout": 0
+            }
+          },
+          {
+            "call_latency": {
+              "error_kinds": {},
+              "errors": 0,
+              "max_ms": 466.692,
+              "mean_ms": 462.609,
+              "min_ms": 457.609,
+              "n": 12,
+              "p50_ms": 463.297,
+              "p95_ms": 466.519,
+              "p99_ms": 466.657
+            },
+            "calls_ok_per_s": 8.56,
+            "outcomes": {
+              "error": 0,
+              "ok": 12,
+              "timeout": 0
+            }
+          },
+          {
+            "call_latency": {
+              "error_kinds": {},
+              "errors": 0,
+              "max_ms": 487.669,
+              "mean_ms": 465.355,
+              "min_ms": 448.954,
+              "n": 12,
+              "p50_ms": 459.491,
+              "p95_ms": 487.624,
+              "p99_ms": 487.66
+            },
+            "calls_ok_per_s": 8.5,
+            "outcomes": {
+              "error": 0,
+              "ok": 12,
+              "timeout": 0
+            }
+          }
+        ]
+      },
+      "model": "fake",
+      "open": {
+        "p50_ms_per_pass": [
+          452.059,
+          465.001,
+          468.684
+        ],
+        "p95_ms_per_pass": [
+          486.022,
+          487.103,
+          489.913
+        ],
+        "passes": [
+          {
+            "call_latency": {
+              "error_kinds": {},
+              "errors": 0,
+              "max_ms": 486.023,
+              "mean_ms": 460.098,
+              "min_ms": 439.558,
+              "n": 12,
+              "p50_ms": 452.059,
+              "p95_ms": 486.022,
+              "p99_ms": 486.023
+            },
+            "calls_ok_per_s": 8.6,
+            "outcomes": {
+              "error": 0,
+              "ok": 12,
+              "timeout": 0
+            }
+          },
+          {
+            "call_latency": {
+              "error_kinds": {},
+              "errors": 0,
+              "max_ms": 487.454,
+              "mean_ms": 471.24,
+              "min_ms": 461.658,
+              "n": 12,
+              "p50_ms": 465.001,
+              "p95_ms": 487.103,
+              "p99_ms": 487.384
+            },
+            "calls_ok_per_s": 8.4,
+            "outcomes": {
+              "error": 0,
+              "ok": 12,
+              "timeout": 0
+            }
+          },
+          {
+            "call_latency": {
+              "error_kinds": {},
+              "errors": 0,
+              "max_ms": 490.133,
+              "mean_ms": 472.342,
+              "min_ms": 457.86,
+              "n": 12,
+              "p50_ms": 468.684,
+              "p95_ms": 489.913,
+              "p99_ms": 490.089
+            },
+            "calls_ok_per_s": 8.39,
+            "outcomes": {
+              "error": 0,
+              "ok": 12,
+              "timeout": 0
+            }
+          }
+        ]
+      },
+      "overhead": {
+        "note": "median over the repetitions of each pass's percentile; compare the difference with the spread between passes: a difference inside the spread is noise",
+        "p50_ms": -1.704,
+        "p50_ratio": 0.996,
+        "p50_spread_between_passes_ms": {
+          "governed": 5.109,
+          "open": 16.625
+        },
+        "p95_ms": 0.521,
+        "p95_ratio": 1.001
+      },
+      "repetitions": 3,
+      "telemetry_otel_client": "database"
+    },
+    "pipeline": {
+      "background_sync_interval_s": 2.0,
+      "modes": {
+        "background": {
+          "freshness": {
+            "latency": {
+              "error_kinds": {},
+              "errors": 0,
+              "max_ms": 2322.59,
+              "mean_ms": 1866.238,
+              "min_ms": 1569.68,
+              "n": 12,
+              "p50_ms": 1818.753,
+              "p95_ms": 2198.503,
+              "p99_ms": 2297.773
+            },
+            "resolution_note": "polled every 0.2 s with a retrieval call: values are upper bounds, resolution about 0.2 s plus one retrieval",
+            "retrievable": 12,
+            "sent": 12,
+            "timed_out": 0
+          },
+          "inserts": {
+            "achieved_rows_per_s": 49.99,
+            "batch_commit_latency": {
+              "error_kinds": {},
+              "errors": 0,
+              "max_ms": 9.098,
+              "mean_ms": 4.592,
+              "min_ms": 2.143,
+              "n": 148,
+              "p50_ms": 4.366,
+              "p95_ms": 6.991,
+              "p99_ms": 8.5
+            },
+            "batch_size": 10,
+            "batches_behind_schedule": 0,
+            "note": "each writer's first batch is inserted but not timed (new session)",
+            "rows": 1500,
+            "seconds": 30.01,
+            "target_rows_per_s": 50.0,
+            "writers": 2
+          },
+          "pipeline": {
+            "aidb_unprocessed_rows_metric": {
+              "max": 1021.0,
+              "mean": 714.2,
+              "min": 391.0,
+              "n": 30,
+              "p95": 982.9
+            },
+            "drain_after_inserts_stop": {
+              "lag_left": 0,
+              "seconds": 3.66,
+              "timed_out": false
+            },
+            "embedded_rows_per_s": 47.94,
+            "pipeline_error_rows": 0,
+            "pipeline_status_seen": [
+              "Processing"
+            ],
+            "queue_depth_rows": {
+              "max": 141.0,
+              "mean": 102.2,
+              "min": 0.0,
+              "n": 30,
+              "p95": 141.0
+            },
+            "queue_depth_trend_rows_per_s": 0.564,
+            "sampler_errors": 0,
+            "samples": 30
+          }
+        },
+        "live": {
+          "freshness": {
+            "latency": {
+              "error_kinds": {},
+              "errors": 0,
+              "max_ms": 967.383,
+              "mean_ms": 146.529,
+              "min_ms": 16.347,
+              "n": 12,
+              "p50_ms": 39.482,
+              "p95_ms": 604.729,
+              "p99_ms": 894.852
+            },
+            "resolution_note": "polled every 0.2 s with a retrieval call: values are upper bounds, resolution about 0.2 s plus one retrieval",
+            "retrievable": 12,
+            "sent": 13,
+            "timed_out": 0
+          },
+          "inserts": {
+            "achieved_rows_per_s": 47.65,
+            "batch_commit_latency": {
+              "error_kinds": {},
+              "errors": 0,
+              "max_ms": 1416.41,
+              "mean_ms": 226.295,
+              "min_ms": 156.979,
+              "n": 141,
+              "p50_ms": 173.632,
+              "p95_ms": 423.9,
+              "p99_ms": 994.447
+            },
+            "batch_size": 10,
+            "batches_behind_schedule": 11,
+            "note": "each writer's first batch is inserted but not timed (new session)",
+            "rows": 1430,
+            "seconds": 30.01,
+            "target_rows_per_s": 50.0,
+            "writers": 2
+          },
+          "pipeline": {
+            "aidb_unprocessed_rows_metric": {
+              "max": 0.0,
+              "mean": 0.0,
+              "min": 0.0,
+              "n": 30,
+              "p95": 0.0
+            },
+            "drain_after_inserts_stop": {
+              "lag_left": 0,
+              "seconds": 0.04,
+              "timed_out": false
+            },
+            "embedded_rows_per_s": 48.0,
+            "pipeline_error_rows": 0,
+            "pipeline_status_seen": [
+              "UpToDate"
+            ],
+            "queue_depth_rows": {
+              "max": 0.0,
+              "mean": 0.0,
+              "min": 0.0,
+              "n": 30,
+              "p95": 0.0
+            },
+            "queue_depth_trend_rows_per_s": 0.0,
+            "sampler_errors": 0,
+            "samples": 30
+          }
+        }
+      }
+    },
+    "retrieval": {
+      "backends": {
+        "aidb": {
+          "idle": {
+            "first_call_s": 0.06,
+            "latency": {
+              "error_kinds": {},
+              "errors": 0,
+              "max_ms": 40.763,
+              "mean_ms": 10.977,
+              "min_ms": 8.018,
+              "n": 2581,
+              "p50_ms": 10.428,
+              "p95_ms": 14.5,
+              "p99_ms": 17.459
+            },
+            "queries_per_s": 171.82,
+            "readers": 2,
+            "seconds": 15.02,
+            "table_rows_at_start": 1000
+          },
+          "loaded_background": {
+            "drain_after_pass": {
+              "lag_left": 0,
+              "seconds": 28.46,
+              "timed_out": false
+            },
+            "first_call_s": 0.049,
+            "inserts": {
+              "achieved_rows_per_s": 50.6,
+              "batch_commit_latency": {
+                "error_kinds": {},
+                "errors": 0,
+                "max_ms": 8.828,
+                "mean_ms": 4.892,
+                "min_ms": 2.873,
+                "n": 74,
+                "p50_ms": 4.852,
+                "p95_ms": 6.54,
+                "p99_ms": 7.577
+              },
+              "batch_size": 10,
+              "batches_behind_schedule": 0,
+              "note": "each writer's first batch is inserted but not timed (new session)",
+              "rows": 760,
+              "seconds": 15.02,
+              "target_rows_per_s": 50.0,
+              "writers": 2
+            },
+            "latency": {
+              "error_kinds": {},
+              "errors": 0,
+              "max_ms": 29.172,
+              "mean_ms": 10.377,
+              "min_ms": 7.904,
+              "n": 2721,
+              "p50_ms": 9.857,
+              "p95_ms": 13.605,
+              "p99_ms": 16.364
+            },
+            "pipeline": {
+              "aidb_unprocessed_rows_metric": {
+                "max": 1720.0,
+                "mean": 1365.333,
+                "min": 1020.0,
+                "n": 15,
+                "p95": 1678.0
+              },
+              "embedded_rows_per_s": 0.0,
+              "pipeline_error_rows": 0,
+              "pipeline_status_seen": [
+                "Processing"
+              ],
+              "queue_depth_rows": {
+                "max": 720.0,
+                "mean": 365.333,
+                "min": 20.0,
+                "n": 15,
+                "p95": 678.0
+              },
+              "queue_depth_trend_rows_per_s": 49.38,
+              "sampler_errors": 0,
+              "samples": 15
+            },
+            "queries_per_s": 181.18,
+            "readers": 2,
+            "seconds": 15.02,
+            "table_rows_at_start": 1000
+          },
+          "loaded_live": {
+            "drain_after_pass": {
+              "lag_left": 0,
+              "seconds": 0.05,
+              "timed_out": false
+            },
+            "first_call_s": 0.05,
+            "inserts": {
+              "achieved_rows_per_s": 5.24,
+              "batch_commit_latency": {
+                "error_kinds": {},
+                "errors": 0,
+                "max_ms": 5499.341,
+                "mean_ms": 2985.062,
+                "min_ms": 372.549,
+                "n": 6,
+                "p50_ms": 3574.936,
+                "p95_ms": 5224.229,
+                "p99_ms": 5444.319
+              },
+              "batch_size": 10,
+              "batches_behind_schedule": 7,
+              "note": "each writer's first batch is inserted but not timed (new session)",
+              "rows": 80,
+              "seconds": 15.27,
+              "target_rows_per_s": 50.0,
+              "writers": 2
+            },
+            "latency": {
+              "error_kinds": {},
+              "errors": 0,
+              "max_ms": 1592.262,
+              "mean_ms": 330.455,
+              "min_ms": 11.753,
+              "n": 91,
+              "p50_ms": 107.391,
+              "p95_ms": 1358.285,
+              "p99_ms": 1475.689
+            },
+            "pipeline": {
+              "aidb_unprocessed_rows_metric": {
+                "max": 0.0,
+                "mean": 0.0,
+                "min": 0.0,
+                "n": 15,
+                "p95": 0.0
+              },
+              "embedded_rows_per_s": 2.8,
+              "pipeline_error_rows": 0,
+              "pipeline_status_seen": [
+                "UpToDate"
+              ],
+              "queue_depth_rows": {
+                "max": 0.0,
+                "mean": 0.0,
+                "min": 0.0,
+                "n": 15,
+                "p95": 0.0
+              },
+              "queue_depth_trend_rows_per_s": 0.0,
+              "sampler_errors": 0,
+              "samples": 15
+            },
+            "queries_per_s": 6.02,
+            "readers": 2,
+            "seconds": 15.12,
+            "table_rows_at_start": 1000
+          }
+        },
+        "aidb_hybrid": {
+          "idle": {
+            "first_call_s": 0.14,
+            "latency": {
+              "error_kinds": {},
+              "errors": 0,
+              "max_ms": 1397.23,
+              "mean_ms": 42.438,
+              "min_ms": 25.377,
+              "n": 697,
+              "p50_ms": 38.594,
+              "p95_ms": 48.815,
+              "p99_ms": 74.676
+            },
+            "queries_per_s": 46.41,
+            "readers": 2,
+            "seconds": 15.02,
+            "table_rows_at_start": 1000
+          },
+          "loaded_background": {
+            "drain_after_pass": {
+              "lag_left": 0,
+              "seconds": 32.73,
+              "timed_out": false
+            },
+            "first_call_s": 0.081,
+            "inserts": {
+              "achieved_rows_per_s": 50.46,
+              "batch_commit_latency": {
+                "error_kinds": {},
+                "errors": 0,
+                "max_ms": 7.846,
+                "mean_ms": 4.375,
+                "min_ms": 2.478,
+                "n": 74,
+                "p50_ms": 4.337,
+                "p95_ms": 5.966,
+                "p99_ms": 6.734
+              },
+              "batch_size": 10,
+              "batches_behind_schedule": 0,
+              "note": "each writer's first batch is inserted but not timed (new session)",
+              "rows": 760,
+              "seconds": 15.06,
+              "target_rows_per_s": 50.0,
+              "writers": 2
+            },
+            "latency": {
+              "error_kinds": {},
+              "errors": 0,
+              "max_ms": 93.91,
+              "mean_ms": 45.809,
+              "min_ms": 26.157,
+              "n": 648,
+              "p50_ms": 44.58,
+              "p95_ms": 61.085,
+              "p99_ms": 80.829
+            },
+            "pipeline": {
+              "aidb_unprocessed_rows_metric": {
+                "max": 1720.0,
+                "mean": 1365.333,
+                "min": 1020.0,
+                "n": 15,
+                "p95": 1678.0
+              },
+              "embedded_rows_per_s": 0.0,
+              "pipeline_error_rows": 0,
+              "pipeline_status_seen": [
+                "Processing"
+              ],
+              "queue_depth_rows": {
+                "max": 720.0,
+                "mean": 365.333,
+                "min": 20.0,
+                "n": 15,
+                "p95": 678.0
+              },
+              "queue_depth_trend_rows_per_s": 49.409,
+              "sampler_errors": 0,
+              "samples": 15
+            },
+            "queries_per_s": 43.03,
+            "readers": 2,
+            "seconds": 15.06,
+            "table_rows_at_start": 1000
+          },
+          "loaded_live": {
+            "drain_after_pass": {
+              "lag_left": 0,
+              "seconds": 0.04,
+              "timed_out": false
+            },
+            "first_call_s": 0.061,
+            "inserts": {
+              "achieved_rows_per_s": 8.08,
+              "batch_commit_latency": {
+                "error_kinds": {},
+                "errors": 0,
+                "max_ms": 3554.526,
+                "mean_ms": 2357.993,
+                "min_ms": 544.775,
+                "n": 11,
+                "p50_ms": 2589.77,
+                "p95_ms": 3301.993,
+                "p99_ms": 3504.02
+              },
+              "batch_size": 10,
+              "batches_behind_schedule": 13,
+              "note": "each writer's first batch is inserted but not timed (new session)",
+              "rows": 130,
+              "seconds": 16.09,
+              "target_rows_per_s": 50.0,
+              "writers": 2
+            },
+            "latency": {
+              "error_kinds": {},
+              "errors": 0,
+              "max_ms": 1602.963,
+              "mean_ms": 334.486,
+              "min_ms": 35.44,
+              "n": 95,
+              "p50_ms": 148.329,
+              "p95_ms": 1438.108,
+              "p99_ms": 1547.064
+            },
+            "pipeline": {
+              "aidb_unprocessed_rows_metric": {
+                "max": 360.0,
+                "mean": 360.0,
+                "min": 360.0,
+                "n": 16,
+                "p95": 360.0
+              },
+              "embedded_rows_per_s": 7.18,
+              "pipeline_error_rows": 0,
+              "pipeline_status_seen": [
+                "Unknown"
+              ],
+              "queue_depth_rows": {
+                "max": 0.0,
+                "mean": 0.0,
+                "min": 0.0,
+                "n": 16,
+                "p95": 0.0
+              },
+              "queue_depth_trend_rows_per_s": 0.0,
+              "sampler_errors": 0,
+              "samples": 16
+            },
+            "queries_per_s": 5.95,
+            "readers": 2,
+            "seconds": 15.97,
+            "table_rows_at_start": 1000
+          }
+        },
+        "app_fts": {
+          "idle": {
+            "first_call_s": 0.033,
+            "latency": {
+              "error_kinds": {},
+              "errors": 0,
+              "max_ms": 52.541,
+              "mean_ms": 26.9,
+              "min_ms": 3.232,
+              "n": 1090,
+              "p50_ms": 28.177,
+              "p95_ms": 42.677,
+              "p99_ms": 46.194
+            },
+            "queries_per_s": 72.59,
+            "readers": 2,
+            "seconds": 15.02,
+            "table_rows_at_start": 1000
+          },
+          "loaded": {
+            "first_call_s": 0.032,
+            "inserts": {
+              "achieved_rows_per_s": 50.47,
+              "batch_commit_latency": {
+                "error_kinds": {},
+                "errors": 0,
+                "max_ms": 6.498,
+                "mean_ms": 4.462,
+                "min_ms": 2.179,
+                "n": 74,
+                "p50_ms": 4.543,
+                "p95_ms": 5.951,
+                "p99_ms": 6.24
+              },
+              "batch_size": 10,
+              "batches_behind_schedule": 0,
+              "note": "each writer's first batch is inserted but not timed (new session)",
+              "rows": 760,
+              "seconds": 15.06,
+              "target_rows_per_s": 50.0,
+              "writers": 2
+            },
+            "latency": {
+              "error_kinds": {},
+              "errors": 0,
+              "max_ms": 79.671,
+              "mean_ms": 38.062,
+              "min_ms": 3.394,
+              "n": 779,
+              "p50_ms": 37.876,
+              "p95_ms": 62.23,
+              "p99_ms": 68.222
+            },
+            "queries_per_s": 51.73,
+            "readers": 2,
+            "seconds": 15.06,
+            "table_rows_at_start": 1000
+          }
+        },
+        "app_hybrid": {
+          "idle": {
+            "first_call_s": 0.078,
+            "latency": {
+              "error_kinds": {},
+              "errors": 0,
+              "max_ms": 143.882,
+              "mean_ms": 39.861,
+              "min_ms": 13.726,
+              "n": 742,
+              "p50_ms": 40.733,
+              "p95_ms": 59.879,
+              "p99_ms": 83.426
+            },
+            "queries_per_s": 49.4,
+            "query_embedding_latency": {
+              "error_kinds": {},
+              "errors": 0,
+              "max_ms": 97.939,
+              "mean_ms": 11.113,
+              "min_ms": 7.214,
+              "n": 742,
+              "p50_ms": 9.27,
+              "p95_ms": 18.631,
+              "p99_ms": 45.964
+            },
+            "readers": 2,
+            "seconds": 15.02,
+            "table_rows_at_start": 1000
+          },
+          "loaded": {
+            "first_call_s": 0.112,
+            "inserts": {
+              "achieved_rows_per_s": 50.5,
+              "batch_commit_latency": {
+                "error_kinds": {},
+                "errors": 0,
+                "max_ms": 7.125,
+                "mean_ms": 4.023,
+                "min_ms": 2.319,
+                "n": 74,
+                "p50_ms": 3.643,
+                "p95_ms": 6.174,
+                "p99_ms": 6.91
+              },
+              "batch_size": 10,
+              "batches_behind_schedule": 0,
+              "note": "each writer's first batch is inserted but not timed (new session)",
+              "rows": 760,
+              "seconds": 15.05,
+              "target_rows_per_s": 50.0,
+              "writers": 2
+            },
+            "latency": {
+              "error_kinds": {},
+              "errors": 0,
+              "max_ms": 109.638,
+              "mean_ms": 52.047,
+              "min_ms": 13.778,
+              "n": 571,
+              "p50_ms": 51.492,
+              "p95_ms": 76.087,
+              "p99_ms": 91.251
+            },
+            "queries_per_s": 37.94,
+            "query_embedding_latency": {
+              "error_kinds": {},
+              "errors": 0,
+              "max_ms": 46.225,
+              "mean_ms": 10.163,
+              "min_ms": 7.228,
+              "n": 571,
+              "p50_ms": 8.953,
+              "p95_ms": 14.283,
+              "p99_ms": 43.454
+            },
+            "readers": 2,
+            "seconds": 15.05,
+            "table_rows_at_start": 1000
+          }
+        },
+        "app_vector": {
+          "idle": {
+            "first_call_s": 0.048,
+            "latency": {
+              "error_kinds": {},
+              "errors": 0,
+              "max_ms": 47.044,
+              "mean_ms": 12.798,
+              "min_ms": 9.231,
+              "n": 2344,
+              "p50_ms": 12.025,
+              "p95_ms": 16.962,
+              "p99_ms": 29.321
+            },
+            "queries_per_s": 156.19,
+            "query_embedding_latency": {
+              "error_kinds": {},
+              "errors": 0,
+              "max_ms": 42.29,
+              "mean_ms": 9.832,
+              "min_ms": 6.895,
+              "n": 2344,
+              "p50_ms": 9.042,
+              "p95_ms": 13.857,
+              "p99_ms": 26.203
+            },
+            "readers": 2,
+            "seconds": 15.01,
+            "table_rows_at_start": 1000
+          },
+          "loaded": {
+            "first_call_s": 0.05,
+            "inserts": {
+              "achieved_rows_per_s": 50.6,
+              "batch_commit_latency": {
+                "error_kinds": {},
+                "errors": 0,
+                "max_ms": 7.489,
+                "mean_ms": 3.369,
+                "min_ms": 1.785,
+                "n": 74,
+                "p50_ms": 3.108,
+                "p95_ms": 5.792,
+                "p99_ms": 7.467
+              },
+              "batch_size": 10,
+              "batches_behind_schedule": 0,
+              "note": "each writer's first batch is inserted but not timed (new session)",
+              "rows": 760,
+              "seconds": 15.02,
+              "target_rows_per_s": 50.0,
+              "writers": 2
+            },
+            "latency": {
+              "error_kinds": {},
+              "errors": 0,
+              "max_ms": 46.48,
+              "mean_ms": 12.974,
+              "min_ms": 9.264,
+              "n": 2314,
+              "p50_ms": 12.191,
+              "p95_ms": 17.637,
+              "p99_ms": 29.885
+            },
+            "queries_per_s": 154.08,
+            "query_embedding_latency": {
+              "error_kinds": {},
+              "errors": 0,
+              "max_ms": 42.488,
+              "mean_ms": 10.196,
+              "min_ms": 6.879,
+              "n": 2314,
+              "p50_ms": 9.372,
+              "p95_ms": 14.435,
+              "p99_ms": 26.821
+            },
+            "readers": 2,
+            "seconds": 15.02,
+            "table_rows_at_start": 1000
+          }
+        }
+      },
+      "k": 5,
+      "queries": "64 generated questions, cycled"
+    }
+  },
+  "schema": "cpsim-aidb-bench/1",
+  "setup": {
+    "aidb_pipeline_backfill": {
+      "kb": "public.pipeline_cpsim_bench",
+      "rows": 1000,
+      "rows_per_s": 67.97,
+      "seconds": 14.713
+    },
+    "app_embedding_backfill": {
+      "rows": 1000,
+      "rows_per_s": 64.43,
+      "seconds": 15.52
+    },
+    "preload": {
+      "insert_seconds": 0.073,
+      "rows_per_table": 1000
+    }
+  },
+  "skipped": {},
+  "started_at": "2026-11-04T19:56:10Z",
+  "versions": {
+    "agentpg_kit": "0.5.1",
+    "aidb": "7.9.0",
+    "cpsim": "0.2.0",
+    "pgfs": null,
+    "pgvector": "0.8.7",
+    "postgres": "17.11 (Debian 17.11-1.pgdg12+2)",
+    "psycopg": "3.3.6",
+    "settings": {
+      "aidb.allow_insecure_egress": "on",
+      "effective_cache_size": "4GB",
+      "max_connections": "100",
+      "max_parallel_workers": "8",
+      "max_worker_processes": "8",
+      "shared_buffers": "128MB",
+      "work_mem": "4MB"
+    }
+  }
+}

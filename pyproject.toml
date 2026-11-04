@@ -6,7 +6,7 @@ requires-python = ">=3.11"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
 dependencies = [
-  "agentpg-kit>=0.3.1",
+  "agentpg-kit>=0.5.1",
   "fastapi>=0.115",
   "uvicorn[standard]>=0.30",
   "httpx>=0.27",
@@ -31,6 +31,7 @@ packages = ["src/cpsim"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+markers = ["aidb: needs AIDB_TEST_URL (a superuser DSN of an AIDB-enabled Postgres); skipped without it"]
 
 [tool.ruff]
 line-length = 100

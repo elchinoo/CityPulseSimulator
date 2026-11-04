@@ -515,6 +515,7 @@ Licensed under Apache-2.0. See [SECURITY.md](SECURITY.md).
 ## Documentation
 
 * [docs/GUIDE.md](docs/GUIDE.md): the complete guide (ecosystem fit, architecture, install, configuration reference, operations, troubleshooting), including the **Database** insights tab ([8.9](docs/GUIDE.md#89-database-insights-database-tab)), what a read-only user or AgentPG's restricted MCP can see ([8.10](docs/GUIDE.md#810-what-a-read-only-database-user-and-agentpgs-restricted-mcp-can-see)) and the EDB and AgentPG capabilities used.
+* [docs/AIDB-BENCH.md](docs/AIDB-BENCH.md): `cpsim aidb-bench`, an optional mode that uses the simulator as the load and workload generator for EDB AI Accelerator (AIDB) itself (pipeline throughput and freshness, retrieval latency app vs AIDB, concurrent agents, governance overhead), with one real, indicative sample report.
 * [docs/VIDEO-SCRIPT.md](docs/VIDEO-SCRIPT.md): script for a 6 minute tutorial video, with recording notes.
 
 ## Credentials saved in the app
