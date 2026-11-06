@@ -615,9 +615,9 @@ pygments==2.21.0 \
     --hash=sha256:2363c69b61c4a97c838da3b130dcd6468f4848992b21a82f2a63ec34377137d9 \
     --hash=sha256:610ca751c9bc2492b38eb9a38a7fbc93edbbb2d7182edaf34e66ae493dee5c8c
     # via pytest
-pymodbus==3.16.1 \
-    --hash=sha256:19e571826dff37860afc31c845c1fd2fb72acffca02a233506b32d94fa022c33 \
-    --hash=sha256:bb433f7417280bdea1190d95495aa6fb8e1fa8e0d720c436922b270bc378024c
+pymodbus==3.16.2 \
+    --hash=sha256:385ad145955a7af15020ee55c266f7a2c6d9af2180d45c3755a56db9a5014078 \
+    --hash=sha256:64057981fac117ed4b75ea8ef6035369f6ae803247700a5efdf75d76a2be8aef
     # via cpsim (pyproject.toml)
 pytest==9.2.0 \
     --hash=sha256:07acdcf88ec174f907dc01af70bf52d49b014bbab03faeeade31c96b18c2e588 \
